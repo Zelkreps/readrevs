@@ -53,6 +53,43 @@ struct AppleResponseDecoderTests {
         #expect(app.ratingCount == 2_002_740)
         #expect(app.primaryStorefront == .unitedStates)
     }
+
+    @Test("Decodes all valid software autocomplete results")
+    func decodesSoftwareSearchResults() throws {
+        let data = try #require(searchJSON.data(using: .utf8))
+        let apps = try AppleResponseDecoder.apps(
+            from: data,
+            storefront: .czechia
+        )
+
+        #expect(apps.map(\.appID) == [284_910_350, 1_234_567_890])
+        #expect(apps.map(\.name) == ["Yelp: Food & Reviews", "Meal Planner"])
+        #expect(apps.allSatisfy { $0.primaryStorefront == .czechia })
+    }
+
+    @Test("Treats an autocomplete response without matches as empty")
+    func decodesEmptySoftwareSearchResults() throws {
+        let apps = try AppleResponseDecoder.apps(
+            from: Data(#"{"resultCount":0,"results":[]}"#.utf8),
+            storefront: .unitedStates
+        )
+
+        #expect(apps.isEmpty)
+    }
+
+    @Test("Rejects a non-software identifier returned by generic lookup")
+    func rejectsNonSoftwareLookup() {
+        let song = Data(
+            #"{"resultCount":1,"results":[{"wrapperType":"track","kind":"song","trackId":1689284187,"trackName":"A Song"}]}"#.utf8
+        )
+
+        #expect(throws: AppleResponseDecoder.Error.notSoftware) {
+            try AppleResponseDecoder.app(
+                from: song,
+                storefront: .unitedStates
+            )
+        }
+    }
 }
 
 private let reviewFeedJSON = #"""
@@ -86,6 +123,8 @@ private let lookupJSON = #"""
   "resultCount": 1,
   "results": [
     {
+      "wrapperType": "software",
+      "kind": "software",
       "trackId": 284910350,
       "trackName": "Yelp: Food & Reviews",
       "sellerName": "Yelp, Inc.",
@@ -97,6 +136,43 @@ private let lookupJSON = #"""
       "averageUserRating": 4.53,
       "userRatingCount": 2002740,
       "trackViewUrl": "https://apps.apple.com/us/app/id284910350"
+    }
+  ]
+}
+"""#
+
+private let searchJSON = #"""
+{
+  "resultCount": 3,
+  "results": [
+    {
+      "wrapperType": "software",
+      "kind": "software",
+      "trackId": 284910350,
+      "trackName": "Yelp: Food & Reviews",
+      "sellerName": "Yelp, Inc.",
+      "artworkUrl100": "https://example.com/yelp.png",
+      "version": "26.30.0",
+      "primaryGenreName": "Food & Drink",
+      "averageUserRating": 4.53,
+      "userRatingCount": 2002740,
+      "trackViewUrl": "https://apps.apple.com/cz/app/id284910350"
+    },
+    {
+      "wrapperType": "software",
+      "kind": "software",
+      "trackId": 1234567890,
+      "trackName": "Meal Planner",
+      "sellerName": "Example Studio",
+      "artworkUrl100": "https://example.com/meal.png",
+      "version": "2.0",
+      "primaryGenreName": "Lifestyle"
+    },
+    {
+      "wrapperType": "track",
+      "kind": "song",
+      "trackId": 1689284187,
+      "trackName": "A Song"
     }
   ]
 }

@@ -67,7 +67,7 @@ final class ReviewDashboardModel {
         )
         let syncResult = await syncService.sync(
             appID: requestedAppID,
-            storefronts: Storefront.priority,
+            storefronts: Storefront.allCases,
             pagesPerStorefront: 1
         )
 

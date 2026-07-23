@@ -11,6 +11,12 @@ protocol AppleReviewClientProtocol: Sendable {
         appID: Int64,
         storefront: Storefront
     ) async throws -> AppMetadata
+
+    func searchApps(
+        term: String,
+        storefront: Storefront,
+        limit: Int
+    ) async throws -> [AppMetadata]
 }
 
 struct AppleReviewClient: AppleReviewClientProtocol, Sendable {
@@ -62,6 +68,20 @@ struct AppleReviewClient: AppleReviewClientProtocol, Sendable {
         )
         let data = try await data(from: url)
         return try AppleResponseDecoder.app(from: data, storefront: storefront)
+    }
+
+    func searchApps(
+        term: String,
+        storefront: Storefront,
+        limit: Int = 20
+    ) async throws -> [AppMetadata] {
+        let url = try AppleEndpointBuilder.softwareSearchURL(
+            term: term,
+            storefront: storefront,
+            limit: limit
+        )
+        let data = try await data(from: url)
+        return try AppleResponseDecoder.apps(from: data, storefront: storefront)
     }
 
     private func data(from url: URL) async throws -> Data {

@@ -4,22 +4,44 @@ struct ReviewFilterBar: View {
     @Bindable var model: ReviewDashboardModel
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Full-text search", systemImage: "text.magnifyingglass")
+                    .font(.headline)
+                Spacer()
+                Text("Searches titles, review text, authors, and versions")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("Search title, review, or author", text: $model.filters.searchText)
-                    .textFieldStyle(.plain)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+
+            HStack(spacing: 8) {
+                TextField(
+                    "Search every synced review…",
+                    text: $model.filters.searchText,
+                    prompt: Text("Try “crash”, “subscription”, or a version number")
+                )
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+
+                if !model.filters.searchText.isEmpty {
+                    Button {
+                        model.filters.searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear full-text search")
+                    .accessibilityLabel("Clear full-text search")
+                }
+            }
 
             HStack(spacing: 10) {
                 Picker("Country", selection: $model.filters.storefront) {
                     Text("All Countries").tag(Storefront?.none)
-                    ForEach(Storefront.priority) { storefront in
-                        Text(storefront.displayName).tag(Storefront?.some(storefront))
+                    ForEach(sortedStorefronts) { storefront in
+                        Text("\(storefront.flagEmoji) \(storefront.displayName)")
+                            .tag(Storefront?.some(storefront))
                     }
                 }
 
@@ -45,17 +67,28 @@ struct ReviewFilterBar: View {
 
                 Spacer()
 
+                Text("\(model.filteredReviews.count) matches")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+
                 if model.isFiltered {
                     Button("Clear", action: model.clearFilters)
                 }
             }
             .pickerStyle(.menu)
         }
-        .padding(14)
+        .padding(16)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+    }
+
+    private var sortedStorefronts: [Storefront] {
+        Storefront.allCases.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
     }
 }

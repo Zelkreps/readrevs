@@ -3,12 +3,15 @@ import Foundation
 enum AppleResponseDecoder {
     enum Error: Swift.Error, Equatable, LocalizedError, Sendable {
         case appNotFound
+        case notSoftware
         case invalidLookupResponse
 
         var errorDescription: String? {
             switch self {
             case .appNotFound:
                 "No app was found for that identifier in the selected App Store."
+            case .notSoftware:
+                "That identifier does not belong to an App Store app."
             case .invalidLookupResponse:
                 "Apple returned incomplete app information."
             }
@@ -66,12 +69,37 @@ enum AppleResponseDecoder {
             }
             throw Error.invalidLookupResponse
         }
+        guard isSoftware(result) else {
+            throw Error.notSoftware
+        }
+        guard let app = appMetadata(from: result, storefront: storefront) else {
+            throw Error.invalidLookupResponse
+        }
+
+        return app
+    }
+
+    static func apps(
+        from data: Data,
+        storefront: Storefront
+    ) throws -> [AppMetadata] {
+        let response = try JSONDecoder().decode(LookupResponse.self, from: data)
+        return response.results
+            .compactMap(\.value)
+            .compactMap { appMetadata(from: $0, storefront: storefront) }
+    }
+
+    private static func appMetadata(
+        from result: LookupResult,
+        storefront: Storefront
+    ) -> AppMetadata? {
         guard
+            isSoftware(result),
             let appID = result.trackID,
             appID > 0,
             let name = normalized(result.trackName)
         else {
-            throw Error.invalidLookupResponse
+            return nil
         }
 
         return AppMetadata(
@@ -88,6 +116,10 @@ enum AppleResponseDecoder {
             appStoreURL: result.trackViewURL.flatMap(URL.init(string:)),
             primaryStorefront: storefront
         )
+    }
+
+    private static func isSoftware(_ result: LookupResult) -> Bool {
+        normalized(result.wrapperType)?.lowercased() == "software"
     }
 
     private static func normalized(_ value: String?) -> String? {
@@ -187,6 +219,8 @@ private struct LookupResponse: Decodable {
 }
 
 private struct LookupResult: Decodable {
+    let wrapperType: String?
+    let kind: String?
     let trackID: Int64?
     let trackName: String?
     let sellerName: String?
@@ -200,6 +234,8 @@ private struct LookupResult: Decodable {
     let trackViewURL: String?
 
     private enum CodingKeys: String, CodingKey {
+        case wrapperType
+        case kind
         case trackID = "trackId"
         case trackName
         case sellerName

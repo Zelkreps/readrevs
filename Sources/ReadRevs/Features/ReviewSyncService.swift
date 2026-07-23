@@ -13,9 +13,14 @@ struct ReviewSyncResult: Codable, Hashable, Sendable {
 
 struct ReviewSyncService: Sendable {
     private let client: any AppleReviewClientProtocol
+    private let maximumConcurrentStorefronts: Int
 
-    init(client: any AppleReviewClientProtocol) {
+    init(
+        client: any AppleReviewClientProtocol,
+        maximumConcurrentStorefronts: Int = 8
+    ) {
         self.client = client
+        self.maximumConcurrentStorefronts = max(maximumConcurrentStorefronts, 1)
     }
 
     func sync(
@@ -31,45 +36,42 @@ struct ReviewSyncService: Sendable {
         }
 
         let outcomes = await withTaskGroup(
-            of: IndexedSyncOutcome.self,
+            of: IndexedSyncOutcome?.self,
             returning: [IndexedSyncOutcome].self
         ) { group in
-            for (index, storefront) in uniqueStorefronts.enumerated() {
-                group.addTask { [client] in
-                    var reviews: [AppReview] = []
+            let concurrentCount = min(maximumConcurrentStorefronts, uniqueStorefronts.count)
+            var nextIndex = 0
 
-                    do {
-                        for page in 1 ... pagesToFetch {
-                            let pageReviews = try await client.reviews(
-                                appID: appID,
-                                storefront: storefront,
-                                page: page
-                            )
-                            reviews.append(contentsOf: pageReviews)
-                            if pageReviews.isEmpty {
-                                break
-                            }
-                        }
-                        return IndexedSyncOutcome(
-                            index: index,
-                            storefront: storefront,
-                            reviews: reviews,
-                            failureMessage: nil
-                        )
-                    } catch {
-                        return IndexedSyncOutcome(
-                            index: index,
-                            storefront: storefront,
-                            reviews: reviews,
-                            failureMessage: Self.message(for: error)
-                        )
-                    }
+            func addTask(at index: Int) {
+                let storefront = uniqueStorefronts[index]
+                group.addTask { [client] in
+                    await Self.syncOutcome(
+                        client: client,
+                        appID: appID,
+                        storefront: storefront,
+                        pagesToFetch: pagesToFetch,
+                        index: index
+                    )
                 }
             }
 
+            while nextIndex < concurrentCount {
+                addTask(at: nextIndex)
+                nextIndex += 1
+            }
+
             var values: [IndexedSyncOutcome] = []
-            for await value in group {
-                values.append(value)
+            while let value = await group.next() {
+                if let value {
+                    values.append(value)
+                }
+
+                if Task.isCancelled {
+                    group.cancelAll()
+                } else if nextIndex < uniqueStorefronts.count {
+                    addTask(at: nextIndex)
+                    nextIndex += 1
+                }
             }
             return values.sorted { $0.index < $1.index }
         }
@@ -97,6 +99,50 @@ struct ReviewSyncService: Sendable {
             completedStorefronts: completedStorefronts,
             failures: failures
         )
+    }
+
+    private static func syncOutcome(
+        client: any AppleReviewClientProtocol,
+        appID: Int64,
+        storefront: Storefront,
+        pagesToFetch: Int,
+        index: Int
+    ) async -> IndexedSyncOutcome? {
+        var reviews: [AppReview] = []
+
+        do {
+            for page in 1 ... pagesToFetch {
+                try Task.checkCancellation()
+                let pageReviews = try await client.reviews(
+                    appID: appID,
+                    storefront: storefront,
+                    page: page
+                )
+                try Task.checkCancellation()
+                reviews.append(contentsOf: pageReviews)
+                if pageReviews.isEmpty {
+                    break
+                }
+            }
+            return IndexedSyncOutcome(
+                index: index,
+                storefront: storefront,
+                reviews: reviews,
+                failureMessage: nil
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            if Task.isCancelled {
+                return nil
+            }
+            return IndexedSyncOutcome(
+                index: index,
+                storefront: storefront,
+                reviews: reviews,
+                failureMessage: message(for: error)
+            )
+        }
     }
 
     private static func message(for error: any Swift.Error) -> String {

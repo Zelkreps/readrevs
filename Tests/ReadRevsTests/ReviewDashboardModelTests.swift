@@ -19,6 +19,7 @@ struct ReviewDashboardModelTests {
         #expect(model.metadata?.appID == 2)
         #expect(!model.reviews.isEmpty)
         #expect(model.reviews.allSatisfy { $0.appID == 2 })
+        #expect(Set(model.reviews.map(\.storefront)).count == Storefront.allCases.count)
         #expect(model.isRefreshing == false)
     }
 }
@@ -45,6 +46,10 @@ private struct SwitchingReviewClient: AppleReviewClientProtocol {
     func lookup(appID: Int64, storefront: Storefront) async throws -> AppMetadata {
         try await Task.sleep(for: appID == 1 ? .milliseconds(80) : .milliseconds(2))
         return dashboardMetadata(id: appID, name: "App \(appID)", storefront: storefront)
+    }
+
+    func searchApps(term: String, storefront: Storefront, limit: Int) async throws -> [AppMetadata] {
+        []
     }
 }
 

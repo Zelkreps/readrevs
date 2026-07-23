@@ -4,6 +4,8 @@ enum AppleEndpointBuilder {
     enum Error: Swift.Error, Equatable, LocalizedError, Sendable {
         case invalidAppID
         case invalidPage
+        case invalidSearchTerm
+        case invalidLimit
         case unableToBuildURL
 
         var errorDescription: String? {
@@ -12,6 +14,10 @@ enum AppleEndpointBuilder {
                 "The App Store identifier must be a positive number."
             case .invalidPage:
                 "Apple review feeds support pages 1 through 10."
+            case .invalidSearchTerm:
+                "Enter an app name to search the App Store."
+            case .invalidLimit:
+                "Apple Search supports result limits from 1 through 200."
             case .unableToBuildURL:
                 "The Apple endpoint URL could not be created."
             }
@@ -48,6 +54,33 @@ enum AppleEndpointBuilder {
         components.queryItems = [
             URLQueryItem(name: "id", value: String(appID)),
             URLQueryItem(name: "country", value: storefront.rawValue),
+        ]
+
+        guard let url = components.url else {
+            throw Error.unableToBuildURL
+        }
+        return url
+    }
+
+    static func softwareSearchURL(
+        term: String,
+        storefront: Storefront,
+        limit: Int
+    ) throws -> URL {
+        let normalizedTerm = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTerm.isEmpty else { throw Error.invalidSearchTerm }
+        guard (1 ... 200).contains(limit) else { throw Error.invalidLimit }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "itunes.apple.com"
+        components.path = "/search"
+        components.queryItems = [
+            URLQueryItem(name: "term", value: normalizedTerm),
+            URLQueryItem(name: "country", value: storefront.rawValue),
+            URLQueryItem(name: "media", value: "software"),
+            URLQueryItem(name: "entity", value: "software"),
+            URLQueryItem(name: "limit", value: String(limit)),
         ]
 
         guard let url = components.url else {
