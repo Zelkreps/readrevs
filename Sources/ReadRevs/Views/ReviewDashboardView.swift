@@ -2,6 +2,17 @@ import SwiftUI
 
 struct ReviewDashboardView: View {
     @Bindable var model: ReviewDashboardModel
+    @State private var exportDocument: ReviewExportDocument?
+    @State private var exportFormat: ReviewExportFormat = .json
+    @State private var exportFilename = "reviews.json"
+    @State private var isExporting = false
+    @State private var operationErrorMessage: String?
+    @State private var metricCardHeight: CGFloat = 0
+    @State private var researchPresentation: CodexResearchPresentation?
+    @AppStorage(CodexResearchPreferences.modelIDStorageKey)
+    private var codexModelID = CodexResearchPreferences.defaultModelID
+    @AppStorage(CodexReasoningEffort.storageKey)
+    private var codexReasoningEffort = CodexReasoningEffort.defaultValue.rawValue
 
     var body: some View {
         ScrollView {
@@ -12,7 +23,10 @@ struct ReviewDashboardView: View {
 
                 metrics
                 ReviewFilterBar(model: model)
-                SyncStatusView(model: model)
+                SyncStatusView(
+                    model: model,
+                    onExport: beginExport
+                )
 
                 HStack(alignment: .firstTextBaseline) {
                     Text("Reviews")
@@ -21,6 +35,15 @@ struct ReviewDashboardView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Spacer()
+
+                    Button(action: beginCodexResearch) {
+                        Label("Analyze in Codex", systemImage: "sparkles")
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .frame(width: ReviewDashboardActionLayout.width, alignment: .trailing)
+                    .disabled(model.reviews.isEmpty || model.isRefreshing)
+                    .help("Analyze every synced review in an embedded Codex CLI conversation")
                 }
 
                 reviewContent
@@ -31,16 +54,112 @@ struct ReviewDashboardView: View {
         }
         .background(Color.secondary.opacity(0.035))
         .navigationTitle(model.metadata?.name ?? "Reviews")
+        .sheet(item: $researchPresentation) { presentation in
+            CodexResearchChatView(
+                bundle: presentation.bundle,
+                appName: presentation.appName,
+                reviewCount: presentation.reviewCount,
+                storefrontCount: presentation.storefrontCount,
+                codexModel: presentation.codexModel,
+                reasoningEffort: presentation.reasoningEffort
+            )
+        }
+        .fileExporter(
+            isPresented: $isExporting,
+            document: exportDocument,
+            contentType: exportFormat.contentType,
+            defaultFilename: exportFilename
+        ) { result in
+            if case let .failure(error) = result {
+                operationErrorMessage = error.localizedDescription
+            }
+        }
+        .alert(
+            "ReadRevs",
+            isPresented: Binding(
+                get: { operationErrorMessage != nil },
+                set: { if !$0 { operationErrorMessage = nil } }
+            )
+        ) {
+            Button("OK") { operationErrorMessage = nil }
+        } message: {
+            Text(operationErrorMessage ?? "The operation could not be completed.")
+        }
+    }
+
+    private func beginExport(_ format: ReviewExportFormat) {
+        guard let app = model.metadata else { return }
+        do {
+            let data = try ReviewExportService.data(
+                format: format,
+                app: app,
+                reviews: model.reviews,
+                completedStorefronts: model.completedStorefronts,
+                failures: model.failures
+            )
+            exportFormat = format
+            exportFilename = "\(safeFilename(app.name))-reviews.\(format.filenameExtension)"
+            exportDocument = ReviewExportDocument(data: data)
+            isExporting = true
+        } catch {
+            operationErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func beginCodexResearch() {
+        guard let app = model.metadata else { return }
+        do {
+            let service = try CodexResearchBundleService.live()
+            let bundle = try service.prepare(
+                app: app,
+                reviews: model.reviews,
+                completedStorefronts: model.completedStorefronts,
+                failures: model.failures
+            )
+            let configuration = CodexResearchPreferences.resolve(
+                storedModelID: codexModelID,
+                storedReasoningEffort: codexReasoningEffort
+            )
+            researchPresentation = CodexResearchPresentation(
+                bundle: bundle,
+                appName: app.name,
+                reviewCount: model.reviews.count,
+                storefrontCount: model.collection.storefrontCount,
+                codexModel: configuration.model,
+                reasoningEffort: configuration.reasoningEffort
+            )
+        } catch {
+            operationErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func safeFilename(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let result = value.unicodeScalars.map { allowed.contains($0) ? String($0) : "-" }.joined()
+        return result.isEmpty ? "app" : result
     }
 
     @ViewBuilder
     private var metrics: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 16) {
-                RatingDistributionCard(collection: model.collection)
+                RatingDistributionCard(
+                    collection: model.collection,
+                    minimumHeight: metricCardHeight,
+                    reportsHeight: true
+                )
                     .frame(maxWidth: .infinity)
-                CoverageSummaryCard(metadata: model.metadata, collection: model.collection)
+                CoverageSummaryCard(
+                    metadata: model.metadata,
+                    collection: model.collection,
+                    minimumHeight: metricCardHeight,
+                    reportsHeight: true
+                )
                     .frame(width: 350)
+            }
+            .onPreferenceChange(MetricCardHeightPreferenceKey.self) { height in
+                guard height > 0, abs(metricCardHeight - height) > 0.5 else { return }
+                metricCardHeight = height
             }
 
             VStack(spacing: 16) {
@@ -55,7 +174,7 @@ struct ReviewDashboardView: View {
         if model.isRefreshing, model.reviews.isEmpty {
             VStack(spacing: 12) {
                 ProgressView()
-                Text("Checking priority storefronts…")
+                Text("Checking all \(Storefront.allCases.count) storefronts…")
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 220)
@@ -65,6 +184,7 @@ struct ReviewDashboardView: View {
             } description: {
                 Text(errorMessage)
             }
+            .frame(maxWidth: .infinity, minHeight: 320, alignment: .center)
         } else if model.filteredReviews.isEmpty {
             ContentUnavailableView {
                 Label(model.isFiltered ? "No matching reviews" : "No written reviews found", systemImage: "text.magnifyingglass")
@@ -75,12 +195,23 @@ struct ReviewDashboardView: View {
                     Button("Clear Filters") { model.clearFilters() }
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 320, alignment: .center)
         } else {
             ForEach(model.filteredReviews) { review in
                 ReviewCard(review: review)
             }
         }
     }
+}
+
+private struct CodexResearchPresentation: Identifiable {
+    let id = UUID()
+    let bundle: CodexResearchBundle
+    let appName: String
+    let reviewCount: Int
+    let storefrontCount: Int
+    let codexModel: CodexModelConfiguration
+    let reasoningEffort: CodexReasoningEffort
 }
 
 private struct AppHeaderView: View {
@@ -144,6 +275,8 @@ private struct AppHeaderView: View {
 
 private struct RatingDistributionCard: View {
     let collection: ReviewCollection
+    var minimumHeight: CGFloat? = nil
+    var reportsHeight = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -186,7 +319,7 @@ private struct RatingDistributionCard: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
-        .cardStyle()
+        .cardStyle(minimumHeight: minimumHeight, reportsHeight: reportsHeight)
     }
 }
 
@@ -211,6 +344,8 @@ private struct RatingBar: View {
 private struct CoverageSummaryCard: View {
     let metadata: AppMetadata?
     let collection: ReviewCollection
+    var minimumHeight: CGFloat? = nil
+    var reportsHeight = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -248,7 +383,7 @@ private struct CoverageSummaryCard: View {
                 }
             }
         }
-        .cardStyle()
+        .cardStyle(minimumHeight: minimumHeight, reportsHeight: reportsHeight)
     }
 }
 
@@ -270,13 +405,31 @@ private struct RatingStars: View {
 }
 
 private extension View {
-    func cardStyle() -> some View {
+    func cardStyle(minimumHeight: CGFloat? = nil, reportsHeight: Bool = false) -> some View {
         padding(20)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
+            .background {
+                if reportsHeight {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: MetricCardHeightPreferenceKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                }
+            }
+    }
+}
+
+private struct MetricCardHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

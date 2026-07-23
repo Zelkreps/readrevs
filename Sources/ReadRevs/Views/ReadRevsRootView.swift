@@ -42,6 +42,11 @@ struct ReadRevsRootView: View {
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 .help("Add an App Store app (⌘N)")
+
+                SettingsLink {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("ReadRevs Settings (⌘,)")
             }
         }
         .sheet(isPresented: $isAddingApp) {
@@ -97,9 +102,11 @@ private struct FirstAppView: View {
         } description: {
             Text("Add any public App Store app by pasting its URL or numeric ID.")
         } actions: {
-            Button("Add Your First App", action: onAdd)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+            Button(action: onAdd) {
+                Label("Add Your First App", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
         }
     }
 }
