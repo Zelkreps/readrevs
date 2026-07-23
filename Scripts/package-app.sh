@@ -5,6 +5,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(dirname "$SCRIPT_DIR")
 
 cd "$PROJECT_DIR"
+"$SCRIPT_DIR/build-app-icon.sh"
 swift build
 BIN_DIR=$(swift build --show-bin-path)
 

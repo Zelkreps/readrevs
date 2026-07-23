@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="surface" x1="160" y1="118" x2="876" y2="918" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4056A6"/>
+      <stop offset="0.48" stop-color="#24346E"/>
+      <stop offset="1" stop-color="#121B3D"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(744 226) rotate(132) scale(610)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#92A3FF" stop-opacity="0.50"/>
+      <stop offset="1" stop-color="#92A3FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="226" y1="288" x2="770" y2="743" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9EDFF"/>
+    </linearGradient>
+    <clipPath id="iconMask">
+      <rect x="68" y="60" width="888" height="888" rx="202"/>
+    </clipPath>
+  </defs>
+
+  <!-- Soft macOS lift without turning the icon into a glossy badge. -->
+  <rect x="72" y="78" width="880" height="880" rx="198" fill="#050817" fill-opacity="0.28"/>
+
+  <!-- Calm indigo base. -->
+  <rect x="68" y="60" width="888" height="888" rx="202" fill="url(#surface)"/>
+  <g clip-path="url(#iconMask)">
+    <rect x="68" y="60" width="888" height="888" fill="url(#glow)"/>
+    <ellipse cx="276" cy="862" rx="420" ry="225" fill="#0A102A" fill-opacity="0.34"/>
+  </g>
+  <rect x="79" y="71" width="866" height="866" rx="191" fill="none" stroke="#FFFFFF" stroke-opacity="0.13" stroke-width="8"/>
+
+  <!-- A second review card gives the mark depth and reads as a collection. -->
+  <path d="M323 239H711C777 239 830 292 830 358V575C830 641 777 694 711 694H541L421 780V694H323C257 694 204 641 204 575V358C204 292 257 239 323 239Z"
+        fill="#AAB5FF" fill-opacity="0.26" stroke="#DCE1FF" stroke-opacity="0.34" stroke-width="14"/>
+
+  <!-- Quiet depth under the primary card. -->
+  <path d="M304 299H720C782 299 832 349 832 411V608C832 670 782 720 720 720H520L386 817V720H304C242 720 192 670 192 608V411C192 349 242 299 304 299Z"
+        fill="#070C22" fill-opacity="0.25" transform="translate(0 18)"/>
+
+  <!-- Main review surface. -->
+  <path d="M304 299H720C782 299 832 349 832 411V608C832 670 782 720 720 720H520L386 817V720H304C242 720 192 670 192 608V411C192 349 242 299 304 299Z"
+        fill="url(#paper)"/>
+  <path d="M304 310H720C776 310 821 355 821 411V608C821 664 776 709 720 709H516L397 795V709H304C248 709 203 664 203 608V411C203 355 248 310 304 310Z"
+        fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="8"/>
+
+  <!-- Three compact review signals remain legible at Dock and Finder sizes. -->
+  <g fill="#2D3868">
+    <circle cx="328" cy="440" r="19"/>
+    <rect x="373" y="422" width="302" height="36" rx="18"/>
+    <circle cx="328" cy="522" r="19"/>
+    <rect x="373" y="504" width="221" height="36" rx="18"/>
+    <circle cx="328" cy="604" r="19"/>
+    <rect x="373" y="586" width="266" height="36" rx="18"/>
+  </g>
+
+  <!-- Small insight accent: supporting detail, not the whole identity. -->
+  <g fill="#F6BC55">
+    <path d="M742 184C750 225 773 248 814 256C773 264 750 287 742 328C734 287 711 264 670 256C711 248 734 225 742 184Z"/>
+    <circle cx="831" cy="342" r="15"/>
+  </g>
+</svg>
