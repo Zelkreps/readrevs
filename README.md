@@ -8,7 +8,9 @@ ReadRevs is a native SwiftUI macOS app for collecting and researching public wri
 - Checks the latest written reviews across all 175 App Store storefronts with bounded concurrency.
 - Filters the synced dataset by full text, rating, storefront, version, and sort order.
 - Exports every synced review as lossless JSON or spreadsheet-safe CSV.
-- Creates a local research bundle and opens a new Codex task with a prefilled analysis brief. The prompt is not sent automatically.
+- Creates a local read-only research bundle and opens an embedded Codex conversation with an editable, prefilled analysis prompt. Nothing is sent automatically.
+- Saves completed research conversations locally so previous analyses can be reopened from the history button.
+- Lets you choose the Codex model and reasoning level and customize or restore the default analysis prompt in Settings.
 - Keeps the saved app library locally; no App Store Connect or developer account is required.
 
 ## Data sources and limits
