@@ -1,6 +1,6 @@
 import Foundation
 
-struct CodexModelConfiguration: Equatable, Sendable {
+struct CodexModelConfiguration: Codable, Equatable, Sendable {
     let modelID: String?
     let displayName: String
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ReviewDashboardView: View {
+    @Environment(CodexResearchSessionManager.self) private var researchManager
     @Bindable var model: ReviewDashboardModel
     @State private var exportDocument: ReviewExportDocument?
     @State private var exportFormat: ReviewExportFormat = .json
@@ -8,11 +9,12 @@ struct ReviewDashboardView: View {
     @State private var isExporting = false
     @State private var operationErrorMessage: String?
     @State private var metricCardHeight: CGFloat = 0
-    @State private var researchPresentation: CodexResearchPresentation?
     @AppStorage(CodexResearchPreferences.modelIDStorageKey)
     private var codexModelID = CodexResearchPreferences.defaultModelID
     @AppStorage(CodexReasoningEffort.storageKey)
     private var codexReasoningEffort = CodexReasoningEffort.defaultValue.rawValue
+    @AppStorage(CodexResearchPromptPreferences.storageKey)
+    private var codexAnalysisPrompt = CodexResearchPromptPreferences.defaultAnalysisInstructions
 
     var body: some View {
         ScrollView {
@@ -54,16 +56,6 @@ struct ReviewDashboardView: View {
         }
         .background(Color.secondary.opacity(0.035))
         .navigationTitle(model.metadata?.name ?? "Reviews")
-        .sheet(item: $researchPresentation) { presentation in
-            CodexResearchChatView(
-                bundle: presentation.bundle,
-                appName: presentation.appName,
-                reviewCount: presentation.reviewCount,
-                storefrontCount: presentation.storefrontCount,
-                codexModel: presentation.codexModel,
-                reasoningEffort: presentation.reasoningEffort
-            )
-        }
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
@@ -120,13 +112,21 @@ struct ReviewDashboardView: View {
                 storedModelID: codexModelID,
                 storedReasoningEffort: codexReasoningEffort
             )
-            researchPresentation = CodexResearchPresentation(
-                bundle: bundle,
-                appName: app.name,
-                reviewCount: model.reviews.count,
-                storefrontCount: model.collection.storefrontCount,
-                codexModel: configuration.model,
-                reasoningEffort: configuration.reasoningEffort
+            try researchManager.presentNewSession(
+                CodexResearchSessionRequest(
+                    bundle: bundle,
+                    appID: app.appID,
+                    appName: app.name,
+                    reviewCount: model.reviews.count,
+                    storefrontCount: model.collection.storefrontCount,
+                    codexModel: configuration.model,
+                    reasoningEffort: configuration.reasoningEffort,
+                    initialDraft: CodexResearchPromptPreferences.prefilledMessage(
+                        appName: app.name,
+                        reviewCount: model.reviews.count,
+                        instructions: codexAnalysisPrompt
+                    )
+                )
             )
         } catch {
             operationErrorMessage = error.localizedDescription
@@ -202,16 +202,6 @@ struct ReviewDashboardView: View {
             }
         }
     }
-}
-
-private struct CodexResearchPresentation: Identifiable {
-    let id = UUID()
-    let bundle: CodexResearchBundle
-    let appName: String
-    let reviewCount: Int
-    let storefrontCount: Int
-    let codexModel: CodexModelConfiguration
-    let reasoningEffort: CodexReasoningEffort
 }
 
 private struct AppHeaderView: View {

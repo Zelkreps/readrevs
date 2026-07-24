@@ -7,6 +7,9 @@ struct ReadRevsSettingsView: View {
     @AppStorage(CodexReasoningEffort.storageKey)
     private var selectedReasoningEffort = CodexReasoningEffort.defaultValue.rawValue
 
+    @AppStorage(CodexResearchPromptPreferences.storageKey)
+    private var analysisPrompt = CodexResearchPromptPreferences.defaultAnalysisInstructions
+
     @State private var catalog = CodexModelCatalog.live()
 
     private var selectedModel: CodexModelDescriptor {
@@ -74,9 +77,41 @@ struct ReadRevsSettingsView: View {
             } footer: {
                 Text("Models and supported reasoning levels come from the Codex catalog installed on this Mac. Both selections are saved and apply to new review-research conversations.")
             }
+
+            Section {
+                TextEditor(text: $analysisPrompt)
+                    .font(.body)
+                    .frame(minHeight: 190)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.2))
+                    }
+
+                HStack {
+                    Text("\(analysisPrompt.count.formatted()) characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        analysisPrompt = CodexResearchPromptPreferences.defaultAnalysisInstructions
+                    } label: {
+                        Label("Restore Default", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(analysisPrompt == CodexResearchPromptPreferences.defaultAnalysisInstructions)
+                }
+            } header: {
+                Label("Default Analysis Prompt", systemImage: "text.quote")
+            } footer: {
+                Text("This text prefills the first message and remains editable before you send it. Read-only workspace and untrusted-data safety rules are fixed separately.")
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 390)
+        .frame(width: 620, height: 650)
         .navigationTitle("ReadRevs Settings")
         .onAppear(perform: normalizeSelections)
         .onChange(of: selectedModelID) {

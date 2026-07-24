@@ -1,86 +1,120 @@
 import Foundation
 import Observation
 
-enum CodexChatRole: Equatable, Sendable {
+enum CodexChatRole: String, Codable, Equatable, Sendable {
     case user
     case assistant
 }
 
-struct CodexChatMessage: Identifiable, Sendable {
-    let id = UUID()
+struct CodexChatMessage: Codable, Equatable, Identifiable, Sendable {
+    let id: UUID
     let role: CodexChatRole
     let text: String
+
+    init(id: UUID = UUID(), role: CodexChatRole, text: String) {
+        self.id = id
+        self.role = role
+        self.text = text
+    }
 }
 
 @MainActor
 @Observable
-final class CodexResearchChatModel {
+final class CodexResearchChatModel: Identifiable {
+    let id: UUID
+    let appID: Int64
     let appName: String
     let reviewCount: Int
     let storefrontCount: Int
     let codexModel: CodexModelConfiguration
     let reasoningEffort: CodexReasoningEffort
+    let createdAt: Date
 
     var messages: [CodexChatMessage] = []
     var draft = ""
     var isRunning = false
     var activityText = "Preparing research…"
     var errorMessage: String?
+    var historyErrorMessage: String?
+    var updatedAt: Date
+    var onTurnCompleted: ((CodexResearchChatModel) -> Void)?
 
     private let bundle: CodexResearchBundle
-    private var hasStarted = false
+    private let historyRepository: CodexResearchHistoryRepository
+    private var historyCreatedAt: Date?
+    private var lastSubmittedPrompt: String?
     private var threadID: String?
     private var currentRun: CodexCLIRun?
     private var turnTask: Task<Void, Never>?
 
     init(
+        id: UUID = UUID(),
         bundle: CodexResearchBundle,
+        appID: Int64,
         appName: String,
         reviewCount: Int,
         storefrontCount: Int,
         codexModel: CodexModelConfiguration,
-        reasoningEffort: CodexReasoningEffort
+        reasoningEffort: CodexReasoningEffort,
+        initialDraft: String,
+        historyRepository: CodexResearchHistoryRepository
     ) {
+        let now = Date.now
+        self.id = id
         self.bundle = bundle
+        self.appID = appID
         self.appName = appName
         self.reviewCount = reviewCount
         self.storefrontCount = storefrontCount
         self.codexModel = codexModel
         self.reasoningEffort = reasoningEffort
+        self.draft = initialDraft
+        self.historyRepository = historyRepository
+        self.createdAt = now
+        self.updatedAt = now
     }
 
-    var canSendFollowUp: Bool {
-        threadID != nil && !isRunning && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    var canSendMessage: Bool {
+        !isRunning && errorMessage == nil && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var primaryActionTitle: String {
+        messages.isEmpty ? "Analyze" : "Send"
     }
 
     var canRetry: Bool {
         !isRunning && errorMessage != nil
     }
 
-    func startIfNeeded() {
-        guard !hasStarted else { return }
-        hasStarted = true
-        messages.append(
-            CodexChatMessage(
-                role: .user,
-                text: "Analyze all \(reviewCount.formatted()) synced reviews for \(appName)."
-            )
-        )
-        startTurn(prompt: bundle.initialPrompt)
+    var hasStarted: Bool {
+        messages.contains(where: { $0.role == .user })
     }
 
-    func sendFollowUp() {
+    var hasCompletedResponse: Bool {
+        messages.contains(where: { $0.role == .assistant })
+    }
+
+    func sendMessage() {
         let prompt = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isRunning, threadID != nil else { return }
+        guard !prompt.isEmpty, canSendMessage else { return }
+        let isFirstTurn = threadID == nil
         draft = ""
         messages.append(CodexChatMessage(role: .user, text: prompt))
-        startTurn(prompt: prompt)
+        historyCreatedAt = historyCreatedAt ?? .now
+        updatedAt = .now
+        let submittedPrompt = isFirstTurn ? bundle.prompt(for: prompt) : prompt
+        lastSubmittedPrompt = submittedPrompt
+        startTurn(prompt: submittedPrompt)
     }
 
     func retry() {
-        guard canRetry else { return }
+        guard canRetry, let lastSubmittedPrompt else { return }
         errorMessage = nil
-        startTurn(prompt: threadID == nil ? bundle.initialPrompt : "Continue the interrupted analysis.")
+        startTurn(prompt: lastSubmittedPrompt)
+    }
+
+    func loadHistory() throws -> [CodexResearchHistoryEntry] {
+        try historyRepository.load()
     }
 
     func cancel() {
@@ -92,6 +126,7 @@ final class CodexResearchChatModel {
             activityText = "Stopped"
         }
         isRunning = false
+        updatedAt = .now
     }
 
     private func startTurn(prompt: String) {
@@ -106,6 +141,7 @@ final class CodexResearchChatModel {
         errorMessage = nil
         activityText = "Checking Codex CLI…"
         var receivedAssistantMessage = false
+        var completedTurn = false
 
         do {
             let client = try CodexCLIClient.live()
@@ -140,6 +176,7 @@ final class CodexResearchChatModel {
                 case let .assistantMessage(text):
                     receivedAssistantMessage = true
                     messages.append(CodexChatMessage(role: .assistant, text: text))
+                    persistHistory()
                     activityText = "Finishing…"
                 case .turnCompleted:
                     activityText = "Ready for a follow-up"
@@ -154,6 +191,7 @@ final class CodexResearchChatModel {
             if !receivedAssistantMessage {
                 throw ChatError.emptyResponse
             }
+            completedTurn = true
         } catch is CancellationError {
             activityText = "Stopped"
         } catch {
@@ -164,6 +202,32 @@ final class CodexResearchChatModel {
         currentRun = nil
         isRunning = false
         turnTask = nil
+        updatedAt = .now
+        if completedTurn {
+            onTurnCompleted?(self)
+        }
+    }
+
+    private func persistHistory() {
+        let now = Date.now
+        let entry = CodexResearchHistoryEntry(
+            id: id,
+            appID: appID,
+            appName: appName,
+            reviewCount: reviewCount,
+            storefrontCount: storefrontCount,
+            createdAt: historyCreatedAt ?? now,
+            updatedAt: now,
+            codexModel: codexModel,
+            reasoningEffort: reasoningEffort,
+            messages: messages
+        )
+        do {
+            try historyRepository.upsert(entry)
+            historyErrorMessage = nil
+        } catch {
+            historyErrorMessage = "This response could not be saved to history: \(error.localizedDescription)"
+        }
     }
 
     private func activityDescription(for kind: String) -> String {

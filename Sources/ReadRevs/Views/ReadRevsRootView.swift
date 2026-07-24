@@ -3,11 +3,15 @@ import SwiftUI
 struct ReadRevsRootView: View {
     @State private var library = SavedAppsStore()
     @State private var dashboard = ReviewDashboardModel()
+    @State private var researchManager = CodexResearchSessionManager()
     @State private var isAddingApp = false
+    @State private var isShowingResearchCenter = false
     @State private var appPendingRemoval: AppMetadata?
+    @State private var selectedHistoryEntry: CodexResearchHistoryEntry?
 
     var body: some View {
         @Bindable var library = library
+        @Bindable var researchManager = researchManager
 
         NavigationSplitView {
             AppSidebar(
@@ -36,6 +40,23 @@ struct ReadRevsRootView: View {
                 }
 
                 Button {
+                    researchManager.refreshHistory()
+                    isShowingResearchCenter = true
+                } label: {
+                    ResearchToolbarLabel(runningCount: researchManager.runningSessionCount)
+                }
+                .help("Open current and saved review research")
+                .popover(isPresented: $isShowingResearchCenter, arrowEdge: .top) {
+                    CodexResearchCenterPopover(
+                        sessions: researchManager.researchCenterSessions,
+                        entries: researchManager.historyEntries,
+                        errorMessage: researchManager.historyErrorMessage,
+                        onOpenSession: openResearchSession,
+                        onOpenHistory: openHistoryEntry
+                    )
+                }
+
+                Button {
                     isAddingApp = true
                 } label: {
                     Label("Add App", systemImage: "plus")
@@ -48,6 +69,19 @@ struct ReadRevsRootView: View {
                 }
                 .help("ReadRevs Settings (⌘,)")
             }
+        }
+        .environment(researchManager)
+        .sheet(
+            item: $researchManager.presentedSession,
+            onDismiss: researchManager.discardUnsubmittedSessions
+        ) { session in
+            CodexResearchChatView(
+                model: session,
+                sessionManager: researchManager
+            )
+        }
+        .sheet(item: $selectedHistoryEntry) { entry in
+            CodexResearchHistoryDetailView(entry: entry)
         }
         .sheet(isPresented: $isAddingApp) {
             AddAppView(client: AppleReviewClient()) { app in
@@ -83,6 +117,18 @@ struct ReadRevsRootView: View {
                 library.upsert(refreshed, select: false)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if let notice = researchManager.completionNotice {
+                CodexResearchCompletionToast(
+                    notice: notice,
+                    onOpen: researchManager.openCompletionNotice,
+                    onDismiss: researchManager.dismissCompletionNotice
+                )
+                .padding(20)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: researchManager.completionNotice?.id)
     }
 
     private func refreshSelectedApp() async {
@@ -90,6 +136,45 @@ struct ReadRevsRootView: View {
         if let refreshed = dashboard.metadata {
             library.upsert(refreshed, select: false)
         }
+    }
+
+    private func openResearchSession(_ session: CodexResearchChatModel) {
+        isShowingResearchCenter = false
+        researchManager.present(session)
+    }
+
+    private func openHistoryEntry(_ entry: CodexResearchHistoryEntry) {
+        isShowingResearchCenter = false
+        selectedHistoryEntry = entry
+    }
+}
+
+private struct ResearchToolbarLabel: View {
+    let runningCount: Int
+
+    var body: some View {
+        Label {
+            Text("Research")
+        } icon: {
+            Image(systemName: "clock.arrow.circlepath")
+                .overlay(alignment: .topTrailing) {
+                    if runningCount > 0 {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 7, height: 7)
+                            .overlay {
+                                Circle()
+                                    .stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1)
+                            }
+                            .offset(x: 3, y: -2)
+                    }
+                }
+        }
+        .accessibilityLabel(
+            runningCount == 0
+                ? "Research"
+                : "Research, \(runningCount) running"
+        )
     }
 }
 
