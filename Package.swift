@@ -1,5 +1,4 @@
 // swift-tools-version: 6.2
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
@@ -8,18 +7,23 @@ let package = Package(
     platforms: [
         .macOS(.v14),
     ],
+    products: [
+        .library(name: "ReadRevsCore", targets: ["ReadRevsCore"]),
+        .executable(name: "ReadRevsApp", targets: ["ReadRevsApp"]),
+    ],
     targets: [
+        .target(name: "ReadRevsCore"),
         .executableTarget(
-            name: "ReadRevs",
-            linkerSettings: [
-                .unsafeFlags([
-                    "-Xlinker", "-sectcreate",
-                    "-Xlinker", "__TEXT",
-                    "-Xlinker", "__info_plist",
-                    "-Xlinker", "Config/Info.plist",
-                ]),
-            ]
+            name: "ReadRevsApp",
+            dependencies: ["ReadRevsCore"]
         ),
-        .testTarget(name: "ReadRevsTests", dependencies: ["ReadRevs"]),
+        .testTarget(
+            name: "ReadRevsCoreTests",
+            dependencies: ["ReadRevsCore"]
+        ),
+        .testTarget(
+            name: "ReadRevsAppTests",
+            dependencies: ["ReadRevsApp", "ReadRevsCore"]
+        ),
     ]
 )
