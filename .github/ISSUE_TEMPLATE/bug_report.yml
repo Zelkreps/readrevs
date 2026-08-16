@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible ReadRevs problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include Apple Ads credentials, private keys, access tokens, or private review exports.
+        Report security issues through GitHub private vulnerability reporting instead.
+  - type: input
+    id: version
+    attributes:
+      label: ReadRevs version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac architecture
+      placeholder: macOS 26.4, Apple silicon
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected result and the actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Additional context
+      description: Add sanitized logs or screenshots when useful.
+  - type: checkboxes
+    id: sensitive-data
+    attributes:
+      label: Sensitive data check
+      options:
+        - label: I removed credentials, tokens, private keys, and private review data.
+          required: true

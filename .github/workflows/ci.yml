@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test and bundle
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Run tests
+        run: swift test --disable-sandbox --scratch-path "$RUNNER_TEMP/readrevs-tests"
+
+      - name: Build debug app bundle
+        run: ./Scripts/build-app.sh debug
+
+      - name: Verify bundle signature
+        run: codesign --verify --deep --strict "build/ReadRevs Debug.app"

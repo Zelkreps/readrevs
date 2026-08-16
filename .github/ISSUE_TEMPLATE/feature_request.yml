@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose a focused improvement to ReadRevs
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is difficult or unavailable today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the behavior and why it would help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: api-scope
+    attributes:
+      label: Apple Ads scope
+      options:
+        - label: This request does not require campaign create, update, or delete access.
+          required: true
