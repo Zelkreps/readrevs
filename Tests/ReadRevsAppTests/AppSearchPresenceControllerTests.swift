@@ -188,7 +188,7 @@ func appSearchPresenceControllerReusesFreshData() async throws {
     #expect(controller.statusText?.contains("Connect Apple Ads to fetch popularity") == true)
 }
 
-@Test("Connected search presence uses app-aware Apple Ads suggestions and popularity")
+@Test("Connected search presence separates Apple Ads suggestion scores and popularity")
 @MainActor
 func appSearchPresenceControllerUsesConnectedAppleAds() async throws {
     let app = controllerTestApp()
@@ -198,6 +198,28 @@ func appSearchPresenceControllerUsesConnectedAppleAds() async throws {
         suggestions: [
             AppleAdsKeywordSuggestion(text: "quiz maker", popularity: 86),
             AppleAdsKeywordSuggestion(text: "flashcards app", popularity: 73),
+        ],
+        reports: [
+            AppleAdsSearchTermPopularity(
+                period: "2026-08-09",
+                countryOrRegion: "US",
+                genre: "EDUCATION",
+                searchTerm: "quiz maker",
+                rankInGenre: 20,
+                popularityInGenre: 68,
+                popularity: 62,
+                popularityTier: 4
+            ),
+            AppleAdsSearchTermPopularity(
+                period: "2026-08-09",
+                countryOrRegion: "US",
+                genre: "EDUCATION",
+                searchTerm: "flashcards app",
+                rankInGenre: 28,
+                popularityInGenre: 61,
+                popularity: 57,
+                popularityTier: 3
+            ),
         ]
     )
     let rankingScanner = RecordingSearchPresenceRankingScanner()
@@ -221,7 +243,11 @@ func appSearchPresenceControllerUsesConnectedAppleAds() async throws {
         $0.source == .appleAds && $0.intentTags.contains("apple-ads-suggestion")
     }
     #expect(Set(direct.map(\.keyword)) == ["flashcards app", "quiz maker"])
-    #expect(Set(direct.map(\.popularity)) == [73, 86])
+    #expect(Set(direct.compactMap(\.suggestionScore)) == [73, 86])
+    #expect(direct.allSatisfy { $0.popularity == 0 && !$0.hasPopularityMeasurement })
+    let rows = store.searchPresenceRows(for: app.adamID, store: "us")
+    #expect(rows.first { $0.keyword == "quiz maker" }?.suggestionScore == 86)
+    #expect(rows.first { $0.keyword == "quiz maker" }?.popularity == 62)
     #expect(Set(await hints.seeds) == [
         "Example Study: Flashcards & Quiz",
         "Example Study",
@@ -230,6 +256,7 @@ func appSearchPresenceControllerUsesConnectedAppleAds() async throws {
         "Quiz",
     ])
     #expect(await appleAds.promotedObjectIDs.allSatisfy { $0 == 555_000_111 })
+    #expect(await appleAds.reportRequests == ["us|Education"])
     #expect(rankingScanner.requests.first?.keywords.contains("quiz maker") == true)
     #expect(controller.statusText?.contains("Popularity found for 2 of") == true)
 }

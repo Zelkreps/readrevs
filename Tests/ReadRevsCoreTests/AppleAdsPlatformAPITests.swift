@@ -158,7 +158,7 @@ func appleAdsExplainsInvalidOAuthClient() async throws {
     )
 }
 
-@Test("Apple Ads keyword suggestions are app-aware, storefront-scoped, and include popularity")
+@Test("Apple Ads keyword suggestions are app-aware and include a discovery score")
 func appleAdsKeywordSuggestionsUseDocumentedV1Query() async throws {
     let transport = AppleAdsTestTransport(responses: [
         .json(#"{"access_token":"access-token","token_type":"Bearer","expires_in":3600,"scope":"searchadsorg"}"#),

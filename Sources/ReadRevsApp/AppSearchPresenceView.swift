@@ -106,7 +106,7 @@ struct AppSearchPresenceView: View {
                 .help("Refresh candidate terms, popularity, difficulty, and observed positions")
             }
 
-            Text("Candidate terms come from app metadata and localized Apple search suggestions. Position is observed iTunes Search API result order; Apple does not expose a public reverse app-to-keyword index.")
+            Text("Suggestion Score is a discovery signal from Apple Ads; Popularity is available only from the weekly storefront-and-genre report. Position is observed iTunes Search API result order.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -162,6 +162,11 @@ struct AppSearchPresenceView: View {
                 }
             }
             .width(min: 150, ideal: 205)
+
+            TableColumn("Suggestion Score", value: \.suggestionScoreSortValue) { row in
+                AppleAdsSuggestionScoreCell(value: row.suggestionScore)
+            }
+            .width(min: 96, ideal: 112)
 
             TableColumn("Popularity", value: \.popularitySortValue) { row in
                 SearchPresenceMetricBar(
@@ -285,6 +290,10 @@ struct AppSearchPresenceView: View {
         }
         return "This candidate has not been checked yet."
     }
+}
+
+private extension SearchPresenceRow {
+    var suggestionScoreSortValue: Int { suggestionScore ?? -1 }
 }
 
 private struct SearchPresenceStat: View {

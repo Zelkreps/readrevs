@@ -214,7 +214,13 @@ final class RankingScanController: ObservableObject {
             let rhsIsSeed = rhs.genre == "Seed"
             if lhsIsSeed != rhsIsSeed { return lhsIsSeed }
             if lhs.opportunityScore != rhs.opportunityScore { return lhs.opportunityScore > rhs.opportunityScore }
-            if lhs.popularity != rhs.popularity { return lhs.popularity > rhs.popularity }
+            let lhsExact = lhs.hasPopularityMeasurement ? lhs.popularity : -1
+            let rhsExact = rhs.hasPopularityMeasurement ? rhs.popularity : -1
+            if lhsExact != rhsExact { return lhsExact > rhsExact }
+            if lhs.effectiveSuggestionScore != rhs.effectiveSuggestionScore {
+                return (lhs.effectiveSuggestionScore ?? -1)
+                    > (rhs.effectiveSuggestionScore ?? -1)
+            }
             return lhs.keyword < rhs.keyword
         }
 

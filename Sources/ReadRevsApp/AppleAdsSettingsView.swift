@@ -284,7 +284,7 @@ struct AppleAdsSettingsView: View {
                                 .controlSize(.small)
                         }
                     } else if controller.researchAppAdamID == nil {
-                        Text("An eligible app is required for exact keyword popularity.")
+                        Text("An eligible app is required for app-aware keyword suggestions, not popularity reports.")
                             .foregroundStyle(.secondary)
                     }
                 }

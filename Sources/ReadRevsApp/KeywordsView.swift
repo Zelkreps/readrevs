@@ -56,10 +56,15 @@ struct KeywordsView: View {
                     TableColumn("Genre", value: \.genre)
                         .width(min: 100, ideal: 140)
                     TableColumn("Popularity") { keyword in
-                        Text(keyword.popularity.formatted())
+                        Text(keyword.hasPopularityMeasurement ? keyword.popularity.formatted() : "—")
                             .monospacedDigit()
+                            .foregroundStyle(keyword.hasPopularityMeasurement ? .primary : .tertiary)
                     }
                     .width(min: 75, ideal: 90)
+                    TableColumn("Suggestion Score") { keyword in
+                        AppleAdsSuggestionScoreCell(value: keyword.effectiveSuggestionScore)
+                    }
+                    .width(min: 95, ideal: 110)
                     TableColumn("Opportunity") { keyword in
                         Text(keyword.opportunityScore, format: .number.precision(.fractionLength(1)))
                             .monospacedDigit()

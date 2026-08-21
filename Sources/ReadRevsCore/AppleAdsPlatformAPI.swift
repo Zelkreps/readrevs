@@ -180,6 +180,7 @@ public struct AppleAdsAccountAccess: Codable, Equatable, Identifiable, Sendable 
 
 public struct AppleAdsKeywordSuggestion: Codable, Equatable, Sendable {
     public let text: String
+    /// Apple's discovery score from Keyword Suggestions. It is not storefront popularity.
     public let popularity: Int
 
     public init(text: String, popularity: Int) {

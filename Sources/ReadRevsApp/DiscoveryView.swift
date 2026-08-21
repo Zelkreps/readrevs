@@ -6,7 +6,7 @@ private struct DiscoverySummaryRow: Identifiable {
     let store: String
     let genre: String
     let keywordCount: Int
-    let topPopularity: Int
+    let topPopularity: Int?
 }
 
 private struct PopularityCandidate {
@@ -54,7 +54,6 @@ final class DiscoveryController: ObservableObject {
     private var popularityAppleReportSuccessCount = 0
     private var popularityAppleReportMatchCount = 0
     private var popularityAppleReportFailures: [String] = []
-    private var popularityAppleAppFailure: String?
 
     init(
         hintsClient: any AppStoreSearchHintsProviding = AppStoreSearchHintsClient(),
@@ -174,6 +173,10 @@ final class DiscoveryController: ObservableObject {
     ) {
         let requested = stableUniqueKeywords(keywords)
         guard !requested.isEmpty else { return }
+        guard !project.genres.isEmpty else {
+            statusText = "Select at least one genre to fetch storefront popularity."
+            return
+        }
         let candidates = requested.map {
             PopularityCandidate(project: project, keyword: $0, target: target)
         }
@@ -195,23 +198,7 @@ final class DiscoveryController: ObservableObject {
             guard let self else { return }
             defer { finish(runID: currentRunID) }
 
-            var appleAdsCredentials = connectedCredentials
-            if !appleAdsCredentials.hasResearchApp {
-                do {
-                    appleAdsCredentials = try await AppleAdsResearchAppResolver(
-                        client: appleAdsClient,
-                        credentialStore: appleAdsCredentialStore
-                    ).resolve(
-                        credentials: appleAdsCredentials,
-                        candidates: store.library.apps,
-                        target: target
-                    )
-                } catch is CancellationError {
-                    return
-                } catch {
-                    popularityAppleAppFailure = error.localizedDescription
-                }
-            }
+            let appleAdsCredentials = connectedCredentials
 
             while let batch = dequeuePopularityBatch() {
                 guard !Task.isCancelled, runID == currentRunID else { return }
@@ -242,12 +229,8 @@ final class DiscoveryController: ObservableObject {
                     popularityAppleReportSuccessCount += resolution.reportSuccessCount
                     popularityAppleReportMatchCount += resolution.reportMatchCount
                     popularityAppleReportFailures.append(contentsOf: resolution.reportFailures)
-                    if let appSuggestionFailure = resolution.appSuggestionFailure {
-                        popularityAppleAppFailure = appSuggestionFailure
-                    }
-                    didSucceed = resolution.reportSuccessCount > 0
-                        || (resolution.appSuggestionsAttempted
-                            && resolution.appSuggestionFailure == nil)
+                    didSucceed = resolution.reportRequestCount > 0
+                        && resolution.reportSuccessCount == resolution.reportRequestCount
 
                     guard !Task.isCancelled, runID == currentRunID else { return }
                     let topic = context.project.topic
@@ -322,8 +305,7 @@ final class DiscoveryController: ObservableObject {
         }.map { self.normalizedKeyword($0.keyword) })
         if appendsResults {
             excludedKeys.formUnion(project.keywords.lazy.filter {
-                ($0.source == .appleSearchHints
-                    || $0.intentTags.contains("apple-ads-suggestion"))
+                ($0.source == .appleSearchHints || $0.isAppleAdsSuggestion)
                     && $0.language.caseInsensitiveCompare(target.language) == .orderedSame
                     && $0.store.caseInsensitiveCompare(target.store) == .orderedSame
             }.map { self.normalizedKeyword($0.keyword) })
@@ -383,15 +365,14 @@ final class DiscoveryController: ObservableObject {
                                 keyword: suggestion.text,
                                 language: target.language,
                                 store: target.store,
-                                country: target.store.uppercased(),
                                 genre: "Apple Ads Suggestions",
-                                popularity: suggestion.popularity,
+                                popularity: 0,
+                                suggestionScore: suggestion.popularity,
                                 intentTags: ["apple-ads-suggestion"],
                                 matchedTerms: requestedSeeds,
                                 source: .appleAds,
                                 isTracked: false,
-                                updatedAt: checkedAt,
-                                popularityCheckedAt: checkedAt
+                                updatedAt: checkedAt
                             )
                         }
                         var enriched = await Task.detached(priority: .userInitiated) {
@@ -410,17 +391,9 @@ final class DiscoveryController: ObservableObject {
                             }
                         }
                         let keywords = filtered.map(\.text)
-                        if appendsResults {
-                            directSuggestionRecords = enriched
-                            directSuggestionKeywords = keywords
-                            excludedKeys.formUnion(keywords.map(normalizedKeyword))
-                        } else {
-                            store.replaceRelatedSuggestions(enriched, target: target, into: project.id)
-                            completed = requestedSeeds.count
-                            onReady(keywords)
-                            statusText = "Found \(keywords.count) Apple Ads suggestions with direct popularity."
-                            return
-                        }
+                        directSuggestionRecords = enriched
+                        directSuggestionKeywords = keywords
+                        excludedKeys.formUnion(keywords.map(normalizedKeyword))
                     } else {
                         appleAdsFallbackReason = "Apple Ads returned no related suggestions."
                     }
@@ -430,7 +403,7 @@ final class DiscoveryController: ObservableObject {
                     if error.localizedDescription.localizedCaseInsensitiveContains(
                         "app not found or access denied"
                     ) {
-                        appleAdsFallbackReason = "The selected research app is not available to this Apple Ads account; using the weekly genre report."
+                        appleAdsFallbackReason = "The selected research app is unavailable, so app-aware keyword suggestions could not be loaded; using Apple search hints and the weekly genre report."
                     } else {
                         appleAdsFallbackReason = "Apple Ads suggestions unavailable: \(error.localizedDescription)"
                     }
@@ -439,7 +412,9 @@ final class DiscoveryController: ObservableObject {
 
             var terms: [(term: String, seed: String)] = []
             var seen: Set<String> = []
-            let hintLimit = max(resultLimit - directSuggestionKeywords.count, 0)
+            let hintLimit = !appendsResults && !directSuggestionKeywords.isEmpty
+                ? 0
+                : max(resultLimit - directSuggestionKeywords.count, 0)
             for (index, seed) in requestedSeeds.enumerated() {
                 if terms.count >= hintLimit { break }
                 guard !Task.isCancelled, runID == currentRunID else { return }
@@ -496,24 +471,16 @@ final class DiscoveryController: ObservableObject {
                 return
             }
 
-            guard !hintKeywords.isEmpty else {
-                onReady(keywords)
-                statusText = appendsResults
-                    ? "Found \(keywords.count) more Apple Ads suggestions with direct popularity."
-                    : "Found \(keywords.count) Apple Ads suggestions with direct popularity."
-                return
-            }
-
             let checkedAt = Date()
             var didCompleteMetricLookup = false
             do {
                 var metricRecords: [KeywordRecord] = []
-                var remainingKeywords = hintKeywords
+                var remainingKeywords = keywords
                 if let appleAdsCredentials {
                     let resolution = try await AppleAdsKeywordPopularityResolver(
                         client: appleAdsClient
                     ).resolve(
-                        keywords: hintKeywords,
+                        keywords: keywords,
                         target: target,
                         genres: project.genres,
                         credentials: appleAdsCredentials,
@@ -521,21 +488,25 @@ final class DiscoveryController: ObservableObject {
                     )
                     metricRecords.append(contentsOf: resolution.records)
                     remainingKeywords = resolution.unmatchedKeywords
-                    if appleAdsFallbackReason == nil,
-                       let appSuggestionFailure = resolution.appSuggestionFailure
-                    {
-                        appleAdsFallbackReason = "Apple Ads app suggestions unavailable: \(appSuggestionFailure)"
-                    }
-                    if appleAdsFallbackReason == nil,
-                       resolution.reportRequestCount > 0,
+                    if resolution.reportRequestCount > 0,
                        resolution.reportSuccessCount == 0,
                        !resolution.reportFailures.isEmpty
                     {
-                        appleAdsFallbackReason = "Apple Ads genre reports unavailable: \(resolution.reportFailures[0])"
+                        let reportFailure = "Apple Ads genre reports unavailable: \(resolution.reportFailures[0])"
+                        appleAdsFallbackReason = [appleAdsFallbackReason, reportFailure]
+                            .compactMap { $0 }
+                            .joined(separator: " ")
                     }
-                    didCompleteMetricLookup = resolution.reportSuccessCount > 0
-                        || (resolution.appSuggestionsAttempted
-                            && resolution.appSuggestionFailure == nil)
+                    didCompleteMetricLookup = resolution.reportRequestCount > 0
+                        && resolution.reportSuccessCount == resolution.reportRequestCount
+                    if project.genres.isEmpty {
+                        appleAdsFallbackReason = [
+                            appleAdsFallbackReason,
+                            "Select at least one genre to fetch storefront popularity.",
+                        ]
+                        .compactMap { $0 }
+                        .joined(separator: " ")
+                    }
                 } else if appleAdsFallbackReason == nil {
                     appleAdsFallbackReason = "Connect Apple Ads to fetch popularity."
                 }
@@ -567,7 +538,7 @@ final class DiscoveryController: ObservableObject {
 
             if didCompleteMetricLookup {
                 store.markPopularityChecked(
-                    keywords: hintKeywords,
+                    keywords: keywords,
                     store: target.store,
                     projectID: project.id,
                     checkedAt: checkedAt
@@ -632,7 +603,6 @@ final class DiscoveryController: ObservableObject {
         popularityAppleReportSuccessCount = 0
         popularityAppleReportMatchCount = 0
         popularityAppleReportFailures = []
-        popularityAppleAppFailure = nil
         return identifier
     }
 
@@ -696,19 +666,9 @@ final class DiscoveryController: ObservableObject {
                 "Apple's weekly genre report matched \(popularityAppleReportMatchCount) keyword\(popularityAppleReportMatchCount == 1 ? "" : "s")."
             )
         }
-        if let failure = popularityAppleAppFailure {
-            if failure.localizedCaseInsensitiveContains("app not found or access denied") {
-                details.append(
-                    "The selected research app is not available to this Apple Ads account; the weekly genre report was used."
-                )
-            } else {
-                details.append(
-                    "Apple Ads exact lookup failed: \(failure)"
-                )
-            }
-        } else if popularityAppleReportRequestCount > 0,
-                  popularityAppleReportSuccessCount == 0,
-                  !popularityAppleReportFailures.isEmpty
+        if popularityAppleReportRequestCount > 0,
+           popularityAppleReportSuccessCount == 0,
+           !popularityAppleReportFailures.isEmpty
         {
             details.append(
                 "Apple Ads genre reports failed."
@@ -780,8 +740,9 @@ struct DiscoveryView: View {
                     }
                     .width(min: 80, ideal: 90)
                     TableColumn("Top Popularity") { row in
-                        Text(row.topPopularity.formatted())
+                        Text(row.topPopularity?.formatted() ?? "—")
                             .monospacedDigit()
+                            .foregroundStyle(row.topPopularity == nil ? .tertiary : .primary)
                     }
                     .width(min: 100, ideal: 120)
                 }
@@ -843,7 +804,7 @@ struct DiscoveryView: View {
                     store: first.store.uppercased(),
                     genre: first.genre,
                     keywordCount: records.count,
-                    topPopularity: records.map(\.popularity).max() ?? 0
+                    topPopularity: records.filter(\.hasPopularityMeasurement).map(\.popularity).max()
                 )
             }
             .sorted {

@@ -35,6 +35,9 @@ mutation calls or project-operated backend.
 
 ## Metric Definitions
 
+- **Suggestion Score** is the discovery signal returned by Apple Ads Keyword
+  Suggestions. It is useful for ordering candidates, but is not storefront-specific
+  popularity.
 - **Popularity** is Apple's 1-100 search popularity when Apple Ads returns an
   exact value. A dash means no exact value was available for that term, country,
   genre, week, or connected account.

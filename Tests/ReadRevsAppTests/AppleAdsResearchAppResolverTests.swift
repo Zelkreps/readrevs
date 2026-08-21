@@ -33,8 +33,8 @@ func appleAdsResearchAppDiscoverySelectsAnAccessibleOwnedApp() async throws {
     #expect(try store.load()?.researchAppAdamID == 22)
 }
 
-@Test("Apple Ads exact popularity requests each unmatched keyword separately")
-func appleAdsExactPopularityUsesSingleTermRequestsAndResearchApp() async throws {
+@Test("Apple Ads exact popularity never falls back to keyword suggestions")
+func appleAdsExactPopularityLeavesTermsMissingFromReportsUnavailable() async throws {
     var credentials = researchTestCredentials()
     credentials.researchAppAdamID = 22
     credentials.researchAppName = "My Promotable App"
@@ -46,23 +46,43 @@ func appleAdsExactPopularityUsesSingleTermRequestsAndResearchApp() async throws 
     let resolution = try await AppleAdsKeywordPopularityResolver(client: client).resolve(
         keywords: ["idle tower defense", "the tower"],
         target: StoreTarget(language: "en", store: "us"),
-        genres: [],
+        genres: ["Education"],
         credentials: credentials,
         checkedAt: Date(timeIntervalSinceReferenceDate: 123)
     )
 
-    #expect(Dictionary(uniqueKeysWithValues: resolution.records.map {
-        ($0.keyword, $0.popularity)
-    }) == [
-        "idle tower defense": 5,
-        "the tower": 7,
-    ])
+    #expect(resolution.records.isEmpty)
+    #expect(resolution.unmatchedKeywords == ["idle tower defense", "the tower"])
+    #expect(await client.reportRequests == ["us|Education"])
+    #expect(await client.suggestionTerms.isEmpty)
+    #expect(await client.promotedObjectIDs.isEmpty)
+}
+
+@Test("Apple Ads popularity report wins over a matching keyword suggestion score")
+func appleAdsPopularityUsesOnlyTheStorefrontReport() async throws {
+    var credentials = researchTestCredentials()
+    credentials.researchAppAdamID = 22
+    credentials.researchAppName = "My Promotable App"
+    let client = ResearchAppleAdsClient(
+        popularityByTerm: ["world flags": 84],
+        reportPopularityByTerm: ["world flags": 61]
+    )
+
+    let resolution = try await AppleAdsKeywordPopularityResolver(client: client).resolve(
+        keywords: ["world flags"],
+        target: StoreTarget(language: "en", store: "us"),
+        genres: ["Education"],
+        credentials: credentials,
+        checkedAt: Date(timeIntervalSinceReferenceDate: 123)
+    )
+
+    let record = try #require(resolution.records.first)
+    #expect(record.popularity == 61)
+    #expect(record.hasPopularityMeasurement)
+    #expect(record.intentTags == ["apple-ads-popularity"])
     #expect(resolution.unmatchedKeywords.isEmpty)
-    #expect(await client.suggestionTerms == [
-        ["idle tower defense"],
-        ["the tower"],
-    ])
-    #expect(await client.promotedObjectIDs == [22, 22])
+    #expect(await client.reportRequests == ["us|Education"])
+    #expect(await client.suggestionTerms.isEmpty)
 }
 
 private func researchTestCredentials() -> AppleAdsCredentials {
@@ -106,17 +126,21 @@ private actor ResearchAppleAdsClient: AppleAdsPlatformProviding {
     private let ownedApps: [AppleAdsPromotableApp]
     private let deniedAppIDs: Set<Int64>
     private let popularityByTerm: [String: Int]
+    private let reportPopularityByTerm: [String: Int]
     private(set) var promotedObjectIDs: [Int64] = []
     private(set) var suggestionTerms: [[String]] = []
+    private(set) var reportRequests: [String] = []
 
     init(
         ownedApps: [AppleAdsPromotableApp] = [],
         deniedAppIDs: Set<Int64> = [],
-        popularityByTerm: [String: Int] = [:]
+        popularityByTerm: [String: Int] = [:],
+        reportPopularityByTerm: [String: Int] = [:]
     ) {
         self.ownedApps = ownedApps
         self.deniedAppIDs = deniedAppIDs
         self.popularityByTerm = popularityByTerm
+        self.reportPopularityByTerm = reportPopularityByTerm
     }
 
     func fetchAccounts(credentials: AppleAdsCredentials) async throws -> [AppleAdsAccountAccess] {
@@ -158,6 +182,18 @@ private actor ResearchAppleAdsClient: AppleAdsPlatformProviding {
         genre: String,
         credentials: AppleAdsCredentials
     ) async throws -> [AppleAdsSearchTermPopularity] {
-        []
+        reportRequests.append("\(target.store)|\(genre)")
+        return reportPopularityByTerm.map { term, popularity in
+            AppleAdsSearchTermPopularity(
+                period: "2026-08-09",
+                countryOrRegion: target.store.uppercased(),
+                genre: genre.uppercased(),
+                searchTerm: term,
+                rankInGenre: 1,
+                popularityInGenre: popularity,
+                popularity: popularity,
+                popularityTier: 4
+            )
+        }
     }
 }

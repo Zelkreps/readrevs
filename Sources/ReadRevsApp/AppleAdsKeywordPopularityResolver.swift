@@ -8,8 +8,6 @@ struct AppleAdsPopularityResolution: Sendable {
     let reportSuccessCount: Int
     let reportMatchCount: Int
     let reportFailures: [String]
-    let appSuggestionsAttempted: Bool
-    let appSuggestionFailure: String?
 }
 
 struct AppleAdsKeywordPopularityResolver: Sendable {
@@ -82,55 +80,6 @@ struct AppleAdsKeywordPopularityResolver: Sendable {
             }
         }
 
-        var appSuggestionsAttempted = false
-        var appSuggestionFailure: String?
-        let reportUnmatched = requested.filter {
-            remainingKeys.contains(normalizedKeyword($0))
-        }
-        if !reportUnmatched.isEmpty, let promotedObjectID = credentials.researchAppAdamID {
-            appSuggestionsAttempted = true
-            for keyword in reportUnmatched {
-                do {
-                    let suggestions = try await client.fetchKeywordSuggestions(
-                        terms: [keyword],
-                        promotedObjectID: promotedObjectID,
-                        target: target,
-                        credentials: credentials
-                    )
-                    let key = normalizedKeyword(keyword)
-                    guard let suggestion = suggestions.first(where: {
-                        normalizedKeyword($0.text) == key
-                    }),
-                          remainingKeys.remove(key) != nil,
-                          let requestedKeyword = requestedByKey[key]
-                    else {
-                        continue
-                    }
-                    records.append(
-                        KeywordRecord(
-                            keyword: requestedKeyword,
-                            language: target.language,
-                            store: target.store,
-                            country: target.store.uppercased(),
-                            genre: "Apple Ads",
-                            popularity: suggestion.popularity,
-                            intentTags: ["apple-ads-exact"],
-                            matchedTerms: [requestedKeyword],
-                            source: .appleAds,
-                            isTracked: false,
-                            updatedAt: checkedAt,
-                            popularityCheckedAt: checkedAt
-                        )
-                    )
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    appSuggestionFailure = error.localizedDescription
-                    break
-                }
-            }
-        }
-
         return AppleAdsPopularityResolution(
             records: records,
             unmatchedKeywords: requested.filter {
@@ -139,9 +88,7 @@ struct AppleAdsKeywordPopularityResolver: Sendable {
             reportRequestCount: reportRequestCount,
             reportSuccessCount: reportSuccessCount,
             reportMatchCount: reportMatchCount,
-            reportFailures: reportFailures,
-            appSuggestionsAttempted: appSuggestionsAttempted,
-            appSuggestionFailure: appSuggestionFailure
+            reportFailures: reportFailures
         )
     }
 

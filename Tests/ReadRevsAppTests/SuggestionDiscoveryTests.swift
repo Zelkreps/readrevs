@@ -133,9 +133,9 @@ func relatedSuggestionSearchMorePreservesExistingResults() async throws {
     #expect(rankingKeywords == ["tempo trainer"])
 }
 
-@Test("Connected Apple Ads suggestions provide direct popularity")
+@Test("Connected Apple Ads keeps suggestion scores separate from report popularity")
 @MainActor
-func relatedSuggestionDiscoveryPrefersConnectedAppleAds() async throws {
+func relatedSuggestionDiscoverySeparatesSuggestionScoreAndPopularity() async throws {
     let target = StoreTarget(language: "en", store: "us")
     let project = ResearchProject(
         name: "Example App",
@@ -151,6 +151,28 @@ func relatedSuggestionDiscoveryPrefersConnectedAppleAds() async throws {
         suggestions: [
             AppleAdsKeywordSuggestion(text: "world flags", popularity: 84),
             AppleAdsKeywordSuggestion(text: "geography quiz", popularity: 76),
+        ],
+        reports: [
+            AppleAdsSearchTermPopularity(
+                period: "2026-08-09",
+                countryOrRegion: "US",
+                genre: "EDUCATION",
+                searchTerm: "world flags",
+                rankInGenre: 7,
+                popularityInGenre: 70,
+                popularity: 61,
+                popularityTier: 4
+            ),
+            AppleAdsSearchTermPopularity(
+                period: "2026-08-09",
+                countryOrRegion: "US",
+                genre: "EDUCATION",
+                searchTerm: "geography quiz",
+                rankInGenre: 11,
+                popularityInGenre: 64,
+                popularity: 58,
+                popularityTier: 3
+            ),
         ]
     )
     let controller = DiscoveryController(
@@ -175,11 +197,18 @@ func relatedSuggestionDiscoveryPrefersConnectedAppleAds() async throws {
     }
 
     let keywords = try #require(store.project(id: project.id)?.keywords)
-    let worldFlags = try #require(keywords.first { $0.keyword == "world flags" })
-    #expect(worldFlags.popularity == 84)
-    #expect(worldFlags.source == .appleAds)
-    #expect(worldFlags.matchedTerms == ["flags"])
-    #expect(worldFlags.intentTags.contains("apple-ads-suggestion"))
+    let worldFlagsSuggestion = try #require(keywords.first {
+        $0.keyword == "world flags" && $0.isAppleAdsSuggestion
+    })
+    let worldFlagsPopularity = try #require(keywords.first {
+        $0.keyword == "world flags" && $0.hasPopularityMeasurement
+    })
+    #expect(worldFlagsSuggestion.popularity == 0)
+    #expect(worldFlagsSuggestion.suggestionScore == 84)
+    #expect(!worldFlagsSuggestion.hasPopularityMeasurement)
+    #expect(worldFlagsSuggestion.matchedTerms == ["flags"])
+    #expect(worldFlagsPopularity.popularity == 61)
+    #expect(worldFlagsPopularity.suggestionScore == nil)
     #expect(rankingKeywords == ["world flags", "geography quiz"])
     #expect(await appleAds.suggestionRequests == [
         SuggestionAppleAdsClient.SuggestionRequest(
@@ -188,8 +217,9 @@ func relatedSuggestionDiscoveryPrefersConnectedAppleAds() async throws {
             store: "us"
         ),
     ])
+    #expect(await appleAds.reportRequests == ["us|Education"])
     #expect(await hints.seeds.isEmpty)
-    #expect(controller.statusText == "Found 2 Apple Ads suggestions with direct popularity.")
+    #expect(controller.statusText == "Found 2 related suggestions.")
 }
 
 @Test("Suggestion fallback enriches hints from the Apple genre report after app access is denied")
@@ -259,17 +289,14 @@ func relatedSuggestionFallbackUsesAppleGenreReport() async throws {
     #expect(!unmatchedHint.hasPopularityMeasurement)
     #expect(suggestions == ["idle games", "tower defense", "long tail term"])
     #expect(await appleAds.reportRequests == ["us|Games"])
-    #expect(await appleAds.suggestionRequests.map(\.terms) == [
-        ["idle"],
-        ["tower defense"],
-    ])
+    #expect(await appleAds.suggestionRequests.map(\.terms) == [["idle"]])
     #expect(controller.statusText?.contains("2 without popularity") == true)
     #expect(controller.statusText?.contains("selected research app") == true)
 }
 
-@Test("An empty initial Apple suggestion result still allows exact popularity enrichment")
+@Test("An empty Apple Ads suggestion result leaves missing report rows unavailable")
 @MainActor
-func emptyInitialAppleSuggestionsStillUseAppSpecificPopularity() async throws {
+func emptyInitialAppleSuggestionsUseHintsWithoutSuggestionFallback() async throws {
     let target = StoreTarget(language: "en", store: "us")
     let project = ResearchProject(
         name: "Example App",
@@ -281,10 +308,7 @@ func emptyInitialAppleSuggestionsStillUseAppSpecificPopularity() async throws {
     )
     let store = try suggestionTestStore(project: project)
     let appleAds = SuggestionAppleAdsClient(
-        suggestionResponses: [
-            [],
-            [AppleAdsKeywordSuggestion(text: "world flags", popularity: 84)],
-        ]
+        suggestionResponses: [[]]
     )
     let controller = DiscoveryController(
         hintsClient: FixedSearchHintsProvider(terms: ["world flags"]),
@@ -307,11 +331,13 @@ func emptyInitialAppleSuggestionsStillUseAppSpecificPopularity() async throws {
     }
 
     let records = try #require(store.project(id: project.id)?.keywords)
-    let metric = try #require(records.first {
-        $0.keyword == "world flags" && $0.source == .appleAds
+    let hint = try #require(records.first {
+        $0.keyword == "world flags" && $0.source == .appleSearchHints
     })
-    #expect(metric.popularity == 84)
-    #expect(await appleAds.suggestionRequests.map(\.terms) == [["flags"], ["world flags"]])
+    #expect(!hint.hasPopularityMeasurement)
+    #expect(hint.suggestionScore == nil)
+    #expect(await appleAds.suggestionRequests.map(\.terms) == [["flags"]])
+    #expect(await appleAds.reportRequests == ["us|Education"])
 }
 
 @Test("Connected Apple Ads discovery stores official weekly popularity")
@@ -395,9 +421,9 @@ func emptyAppleAdsPopularityReportRemainsEmpty() async throws {
     #expect(controller.statusText == "Apple Ads popularity updated.")
 }
 
-@Test("Manual popularity lookup uses an exact Apple Ads suggestion when available")
+@Test("Manual popularity lookup leaves a term unavailable when the report has no row")
 @MainActor
-func manualPopularityLookupPrefersExactAppleAdsResult() async throws {
+func manualPopularityLookupDoesNotUseMatchingSuggestionScore() async throws {
     let target = StoreTarget(language: "en", store: "us")
     let project = ResearchProject(
         name: "Example App",
@@ -405,7 +431,8 @@ func manualPopularityLookupPrefersExactAppleAdsResult() async throws {
         targets: [target],
         genres: ["Education"],
         seedKeywords: ["flags"],
-        focusAppAdamID: 1_234_567_890
+        focusAppAdamID: 1_234_567_890,
+        keywords: [trackedKeyword("flags", target: target)]
     )
     let store = try suggestionTestStore(project: project)
     let appleAds = SuggestionAppleAdsClient(
@@ -430,11 +457,54 @@ func manualPopularityLookupPrefersExactAppleAdsResult() async throws {
         try await Task.sleep(for: .milliseconds(10))
     }
 
-    let record = try #require(store.project(id: project.id)?.keywords.first)
+    let record = try #require(store.project(id: project.id)?.keywords.first {
+        $0.keyword == "flags"
+    })
     #expect(record.keyword == "flags")
-    #expect(record.popularity == 79)
-    #expect(record.source == .appleAds)
-    #expect(controller.statusText == "Apple Ads popularity updated.")
+    #expect(!record.hasPopularityMeasurement)
+    #expect(await appleAds.reportRequests == ["us|Education"])
+    #expect(await appleAds.suggestionRequests.isEmpty)
+    #expect(controller.statusText == "Popularity unavailable for 1 keyword.")
+}
+
+@Test("Popularity lookup requires a genre instead of reinterpreting a suggestion score")
+@MainActor
+func popularityLookupWithoutGenreExplainsTheMissingDimension() async throws {
+    let target = StoreTarget(language: "en", store: "us")
+    let project = ResearchProject(
+        name: "Example App",
+        topic: "geography",
+        targets: [target],
+        genres: [],
+        seedKeywords: ["flags"],
+        keywords: [trackedKeyword("flags", target: target)]
+    )
+    let store = try suggestionTestStore(project: project)
+    let appleAds = SuggestionAppleAdsClient(
+        suggestions: [AppleAdsKeywordSuggestion(text: "flags", popularity: 79)]
+    )
+    let controller = DiscoveryController(
+        hintsClient: RecordingSearchHintsProvider(),
+        appleAdsClient: appleAds,
+        appleAdsCredentialStore: SuggestionCredentialStore(
+            credentials: connectedSuggestionCredentials()
+        )
+    )
+
+    controller.startPopularityLookup(
+        project: project,
+        keywords: ["flags"],
+        target: target,
+        store: store
+    )
+
+    while controller.isRunning {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+
+    #expect(controller.statusText == "Select at least one genre to fetch storefront popularity.")
+    #expect(await appleAds.reportRequests.isEmpty)
+    #expect(await appleAds.suggestionRequests.isEmpty)
 }
 
 @Test("Manual popularity lookup keeps genre report data and leaves unmatched terms unavailable")
@@ -500,9 +570,9 @@ func manualPopularityLookupUsesGenreReportBeforeFallback() async throws {
     #expect(!idle.intentTags.contains("apple-ads-exact"))
     #expect(!tower.hasPopularityMeasurement)
     #expect(await appleAds.reportRequests == ["us|Games"])
-    #expect(await appleAds.suggestionRequests.first?.terms == ["tower"])
+    #expect(await appleAds.suggestionRequests.isEmpty)
     #expect(controller.statusText?.contains("1 of 3 keywords") == true)
-    #expect(controller.statusText?.contains("selected research app") == true)
+    #expect(controller.statusText?.contains("selected research app") == false)
     #expect(controller.statusText?.contains("Apple Ads was unavailable") == false)
 }
 

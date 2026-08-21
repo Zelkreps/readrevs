@@ -25,6 +25,7 @@ struct SearchPresenceRow: Identifiable {
     let language: String
     let store: String
     let source: KeywordSource?
+    let suggestionScore: Int?
     let popularity: Int?
     let difficulty: Int?
     let focusAppPosition: Int?
@@ -482,7 +483,7 @@ final class LibraryStore: ObservableObject {
 
         let retained = library.projects[index].keywords.filter { record in
             let isRelatedSuggestion = record.source == .appleSearchHints
-                || record.intentTags.contains("apple-ads-suggestion")
+                || record.isAppleAdsSuggestion
             return !isRelatedSuggestion
                 || record.store != target.store
                 || record.language != target.language
@@ -618,13 +619,18 @@ final class LibraryStore: ObservableObject {
 
         var didChange = false
         for keywordIndex in library.projects[projectIndex].keywords.indices {
-            let record = library.projects[projectIndex].keywords[keywordIndex]
+            var record = library.projects[projectIndex].keywords[keywordIndex]
             guard record.store == normalizedStore,
                   normalizedWords.contains(normalizedKeyword(record.keyword))
             else {
                 continue
             }
-            library.projects[projectIndex].keywords[keywordIndex].popularityCheckedAt = checkedAt
+            if record.isAppleAdsSuggestion, record.suggestionScore == nil {
+                record.suggestionScore = record.popularity
+                record.popularity = 0
+            }
+            record.popularityCheckedAt = checkedAt
+            library.projects[projectIndex].keywords[keywordIndex] = record
             didChange = true
         }
         guard didChange else { return }
@@ -829,6 +835,7 @@ final class LibraryStore: ObservableObject {
             let representative = matchingRecords.first { $0.source == .appleSearchHints }
                 ?? measuredRecord
                 ?? matchingRecords.first
+            let suggestionScore = matchingRecords.compactMap(\.effectiveSuggestionScore).max()
             let metrics = RankingIndex.searchMetrics(
                 keyword: keyword,
                 store: normalizedStore,
@@ -843,6 +850,7 @@ final class LibraryStore: ObservableObject {
                 language: representative?.language ?? fallbackLanguage,
                 store: normalizedStore,
                 source: representative?.source,
+                suggestionScore: suggestionScore,
                 popularity: measuredRecord?.popularity,
                 difficulty: metrics.difficulty,
                 focusAppPosition: metrics.focusAppPosition,

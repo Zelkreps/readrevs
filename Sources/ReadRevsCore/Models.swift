@@ -65,6 +65,7 @@ public struct KeywordRecord: Identifiable, Codable, Hashable, Sendable {
     public var country: String?
     public var genre: String
     public var popularity: Int
+    public var suggestionScore: Int?
     public var relevanceScore: Double
     public var opportunityScore: Double
     public var intentTags: [String]
@@ -85,6 +86,7 @@ public struct KeywordRecord: Identifiable, Codable, Hashable, Sendable {
         country: String? = nil,
         genre: String,
         popularity: Int,
+        suggestionScore: Int? = nil,
         relevanceScore: Double = 0,
         opportunityScore: Double = 0,
         intentTags: [String] = [],
@@ -104,6 +106,7 @@ public struct KeywordRecord: Identifiable, Codable, Hashable, Sendable {
         self.country = country?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.genre = genre.trimmingCharacters(in: .whitespacesAndNewlines)
         self.popularity = popularity
+        self.suggestionScore = suggestionScore
         self.relevanceScore = relevanceScore
         self.opportunityScore = opportunityScore
         self.intentTags = intentTags
@@ -124,11 +127,32 @@ public struct KeywordRecord: Identifiable, Codable, Hashable, Sendable {
 
     public var hasPopularityMeasurement: Bool {
         switch source {
-        case .legacyPopularity, .csvImport, .appleAds:
+        case .legacyPopularity, .csvImport:
             true
+        case .appleAds:
+            intentTags.contains("apple-ads-popularity")
         case .appleSearchHints, .manual:
             false
         }
+    }
+
+    public var isAppleAdsSuggestion: Bool {
+        source == .appleAds
+            && (intentTags.contains("apple-ads-suggestion")
+                || intentTags.contains("apple-ads-exact"))
+    }
+
+    /// The discovery-only score returned by Apple Ads Keyword Suggestions.
+    ///
+    /// Older ReadRevs builds stored this value in `popularity` and tagged it as either
+    /// `apple-ads-suggestion` or `apple-ads-exact`. Keep those libraries readable while
+    /// ensuring the value is never presented as storefront-specific popularity.
+    public var effectiveSuggestionScore: Int? {
+        if let suggestionScore { return suggestionScore }
+        guard isAppleAdsSuggestion else {
+            return nil
+        }
+        return popularity
     }
 
     public var deduplicationKey: String {
@@ -153,6 +177,7 @@ public struct KeywordRecord: Identifiable, Codable, Hashable, Sendable {
             if refreshed.note?.isEmpty != false {
                 refreshed.note = current?.note
             }
+            refreshed.suggestionScore = record.suggestionScore ?? current?.suggestionScore
             refreshed.popularityCheckedAt = record.popularityCheckedAt ?? current?.popularityCheckedAt
             byKey[key] = refreshed
         }
@@ -168,8 +193,13 @@ public struct KeywordRecord: Identifiable, Codable, Hashable, Sendable {
             if $0.opportunityScore != $1.opportunityScore {
                 return $0.opportunityScore > $1.opportunityScore
             }
-            if $0.popularity != $1.popularity {
-                return $0.popularity > $1.popularity
+            let lhsExact = $0.hasPopularityMeasurement ? $0.popularity : -1
+            let rhsExact = $1.hasPopularityMeasurement ? $1.popularity : -1
+            if lhsExact != rhsExact {
+                return lhsExact > rhsExact
+            }
+            if $0.effectiveSuggestionScore != $1.effectiveSuggestionScore {
+                return ($0.effectiveSuggestionScore ?? -1) > ($1.effectiveSuggestionScore ?? -1)
             }
             return $0.keyword.localizedCaseInsensitiveCompare($1.keyword) == .orderedAscending
         }

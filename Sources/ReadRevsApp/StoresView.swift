@@ -6,7 +6,7 @@ private struct StoreSummaryRow: Identifiable {
     let store: String
     let languages: String
     let keywordCount: Int
-    let topPopularity: Int
+    let topPopularity: Int?
     let scannedTerms: Int
     let observedApps: Int
 }
@@ -27,7 +27,9 @@ struct StoresView: View {
                     Text(row.keywordCount.formatted()).monospacedDigit()
                 }
                 TableColumn("Top Popularity") { row in
-                    Text(row.topPopularity.formatted()).monospacedDigit()
+                    Text(row.topPopularity?.formatted() ?? "—")
+                        .monospacedDigit()
+                        .foregroundStyle(row.topPopularity == nil ? .tertiary : .primary)
                 }
                 TableColumn("Scanned Terms") { row in
                     Text(row.scannedTerms.formatted()).monospacedDigit()
@@ -49,7 +51,7 @@ struct StoresView: View {
                 store: storeCode.uppercased(),
                 languages: Array(Set(targets.map { $0.language.uppercased() })).sorted().joined(separator: ", "),
                 keywordCount: keywords.count,
-                topPopularity: keywords.map(\.popularity).max() ?? 0,
+                topPopularity: keywords.filter(\.hasPopularityMeasurement).map(\.popularity).max(),
                 scannedTerms: scans.count,
                 observedApps: Set(observations.map(\.adamID)).count
             )

@@ -22,8 +22,9 @@ public enum KeywordResearchScorer {
 
             relevance *= genreBoost(record.genre)
             enriched.relevanceScore = rounded(relevance, places: 3)
+            let popularitySignal = record.isAppleAdsSuggestion ? 0 : record.popularity
             enriched.opportunityScore = rounded(
-                relevance * Foundation.sqrt(Double(max(record.popularity, 0))) * 10,
+                relevance * Foundation.sqrt(Double(max(popularitySignal, 0))) * 10,
                 places: 2
             )
             enriched.matchedTerms = matchedTerms

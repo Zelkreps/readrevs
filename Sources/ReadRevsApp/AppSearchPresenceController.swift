@@ -529,16 +529,15 @@ final class AppSearchPresenceController: ObservableObject {
                 keyword: suggestion.text,
                 language: target.language,
                 store: target.store,
-                country: target.store.uppercased(),
                 genre: "Apple Ads Suggestions",
-                popularity: suggestion.popularity,
+                popularity: 0,
+                suggestionScore: suggestion.popularity,
                 relevanceScore: 4 - (Double(offset) / Double(max(uniqueSuggestions.count, 1))),
                 intentTags: ["apple-ads-suggestion"],
                 matchedTerms: uniqueSeeds,
                 source: .appleAds,
                 isTracked: false,
-                updatedAt: checkedAt,
-                popularityCheckedAt: checkedAt
+                updatedAt: checkedAt
             )
         }
     }
@@ -558,7 +557,8 @@ final class AppSearchPresenceController: ObservableObject {
         let skipKeys = Set(project.keywords.compactMap { record -> String? in
             guard record.store.caseInsensitiveCompare(target.store) == .orderedSame,
                   let popularityCheckedAt = record.popularityCheckedAt,
-                  popularityCheckedAt >= (force ? checkedAt : cutoff)
+                  popularityCheckedAt >= (force ? checkedAt : cutoff),
+                  !(record.isAppleAdsSuggestion && record.suggestionScore == nil)
             else {
                 return nil
             }
@@ -585,10 +585,6 @@ final class AppSearchPresenceController: ObservableObject {
                 checkedAt: checkedAt
             )
             let metricRecords = resolution.records
-            let missingKeywords = resolution.unmatchedKeywords
-            if let exactLookupFailure = resolution.appSuggestionFailure {
-                appleAdsSuggestionFailure = exactLookupFailure
-            }
             guard isCurrent(currentRunID) else { return }
             let records = metricRecords.map { record in
                 var updated = record
@@ -598,19 +594,33 @@ final class AppSearchPresenceController: ObservableObject {
                 return updated
             }
             store.mergeKeywords(records, into: project.id)
-            store.markPopularityChecked(
-                keywords: keywords,
-                store: target.store,
-                projectID: project.id,
-                checkedAt: checkedAt
-            )
+            if resolution.reportRequestCount > 0,
+               resolution.reportSuccessCount == resolution.reportRequestCount
+            {
+                store.markPopularityChecked(
+                    keywords: keywords,
+                    store: target.store,
+                    projectID: project.id,
+                    checkedAt: checkedAt
+                )
+            }
             let matchedKeys = Set(metricRecords.map { normalizedKeyword($0.keyword) })
-            let foundCount = skipKeys.union(matchedKeys).count
-            let totalCount = foundCount + missingKeywords.count
+            let previouslyMeasuredKeys = Set(project.keywords.compactMap { record -> String? in
+                guard record.store.caseInsensitiveCompare(target.store) == .orderedSame,
+                      record.hasPopularityMeasurement
+                else {
+                    return nil
+                }
+                let key = normalizedKeyword(record.keyword)
+                return candidateKeys.contains(key) ? key : nil
+            })
+            let foundCount = previouslyMeasuredKeys.union(matchedKeys).count
+            let totalCount = candidates.count
+            let unavailableCount = max(totalCount - foundCount, 0)
             var details: [String] = []
-            if !missingKeywords.isEmpty {
+            if unavailableCount > 0 {
                 details.append(
-                    "Popularity found for \(foundCount) of \(totalCount) terms; \(missingKeywords.count) \(missingKeywords.count == 1 ? "has" : "have") no exact Apple Ads value."
+                    "Popularity found for \(foundCount) of \(totalCount) terms; \(unavailableCount) \(unavailableCount == 1 ? "has" : "have") no exact Apple Ads value."
                 )
             } else if resolution.reportMatchCount > 0 {
                 details.append(
@@ -622,16 +632,22 @@ final class AppSearchPresenceController: ObservableObject {
                     "app not found or access denied"
                 ) {
                     details.append(
-                        "The selected research app is not available to this Apple Ads account; the weekly genre report was used."
+                        "The selected research app is unavailable, so app-aware keyword suggestions could not be loaded."
                     )
                 } else {
                     details.append(
-                        "Apple Ads exact lookup failed: \(appleAdsSuggestionFailure)"
+                        "Apple Ads keyword suggestions unavailable: \(appleAdsSuggestionFailure)"
                     )
                 }
-            } else if !resolution.reportFailures.isEmpty, resolution.reportSuccessCount == 0 {
+            }
+            if !resolution.reportFailures.isEmpty, resolution.reportSuccessCount == 0 {
                 details.append(
                     "Apple Ads genre reports failed."
+                )
+            }
+            if project.genres.isEmpty {
+                details.append(
+                    "Select a genre to check storefront popularity."
                 )
             }
             popularityStatusDetail = details.isEmpty
@@ -711,8 +727,12 @@ final class AppSearchPresenceController: ObservableObject {
                 if lhs.relevanceScore != rhs.relevanceScore {
                     return lhs.relevanceScore > rhs.relevanceScore
                 }
-                if lhs.popularity != rhs.popularity {
-                    return lhs.popularity > rhs.popularity
+                let lhsScore = lhs.effectiveSuggestionScore
+                    ?? (lhs.hasPopularityMeasurement ? lhs.popularity : 0)
+                let rhsScore = rhs.effectiveSuggestionScore
+                    ?? (rhs.hasPopularityMeasurement ? rhs.popularity : 0)
+                if lhsScore != rhsScore {
+                    return lhsScore > rhsScore
                 }
                 return lhs.keyword.localizedCaseInsensitiveCompare(rhs.keyword) == .orderedAscending
             }
@@ -771,8 +791,7 @@ final class AppSearchPresenceController: ObservableObject {
         target: StoreTarget
     ) -> [KeywordRecord] {
         project.keywords.filter {
-            ($0.source == .appleSearchHints
-                || $0.intentTags.contains("apple-ads-suggestion"))
+            ($0.source == .appleSearchHints || $0.isAppleAdsSuggestion)
                 && $0.language.caseInsensitiveCompare(target.language) == .orderedSame
                 && $0.store.caseInsensitiveCompare(target.store) == .orderedSame
         }

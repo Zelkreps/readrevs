@@ -123,7 +123,7 @@ enum AppleAdsResearchAppError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .noLocalOwnedApps:
-            "Search for an app owned by this Apple Ads account in Settings before requesting exact popularity."
+            "Search for an app owned by this Apple Ads account in Settings before requesting app-aware keyword suggestions."
         case .noAccessibleApps:
             "Apple Ads did not return an eligible app for the connected account."
         }

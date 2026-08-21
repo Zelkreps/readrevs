@@ -3,6 +3,49 @@ import Foundation
 import Testing
 @testable import ReadRevsApp
 
+@Test("An exact lookup normalizes legacy suggestion-derived popularity")
+@MainActor
+func exactLookupNormalizesLegacySuggestionRecords() throws {
+    let checkedAt = Date(timeIntervalSinceReferenceDate: 9_000)
+    let legacySuggestion = KeywordRecord(
+        keyword: "world flags",
+        language: "en",
+        store: "us",
+        country: "US",
+        genre: "Apple Ads",
+        popularity: 84,
+        intentTags: ["apple-ads-exact"],
+        source: .appleAds,
+        isTracked: false,
+        updatedAt: checkedAt.addingTimeInterval(-100),
+        popularityCheckedAt: checkedAt.addingTimeInterval(-100)
+    )
+    let project = ResearchProject(
+        name: "Legacy Suggestions",
+        topic: "flags",
+        targets: [StoreTarget(language: "en", store: "us")],
+        genres: ["Education"],
+        seedKeywords: ["flags"],
+        keywords: [legacySuggestion]
+    )
+    let store = try searchPresenceTestStore(
+        library: ASOLibrary(projects: [project])
+    )
+
+    store.markPopularityChecked(
+        keywords: ["world flags"],
+        store: "us",
+        projectID: project.id,
+        checkedAt: checkedAt
+    )
+
+    let normalized = try #require(store.project(id: project.id)?.keywords.first)
+    #expect(normalized.popularity == 0)
+    #expect(normalized.suggestionScore == 84)
+    #expect(normalized.popularityCheckedAt == checkedAt)
+    #expect(!normalized.hasPopularityMeasurement)
+}
+
 @Test("Internal search presence projects stay out of the sidebar")
 @MainActor
 func internalSearchPresenceProjectsAreHiddenFromSidebar() throws {
@@ -228,6 +271,7 @@ func searchPresenceRowsIncludeNotRankedTerms() throws {
                 store: "us",
                 genre: "Education",
                 popularity: 62,
+                intentTags: ["apple-ads-popularity"],
                 source: .appleAds,
                 isTracked: false
             ),

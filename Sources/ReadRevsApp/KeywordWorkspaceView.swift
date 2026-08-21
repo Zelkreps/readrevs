@@ -339,6 +339,9 @@ struct KeywordWorkspaceView: View {
                 if lhs.popularity != rhs.popularity {
                     return lhs.popularity > rhs.popularity
                 }
+                if lhs.suggestionScoreSortValue != rhs.suggestionScoreSortValue {
+                    return lhs.suggestionScoreSortValue > rhs.suggestionScoreSortValue
+                }
                 return lhs.keyword.localizedCaseInsensitiveCompare(rhs.keyword) == .orderedAscending
             }
         }
@@ -595,8 +598,7 @@ struct KeywordWorkspaceView: View {
     private func workspaceRows(project: ResearchProject, tracked: Bool) -> [KeywordWorkspaceRow] {
         let suggestionKeywords = Set(project.keywords.lazy.filter {
             $0.store == selectedStore
-                && ($0.source == .appleSearchHints
-                    || $0.intentTags.contains("apple-ads-suggestion"))
+                && ($0.source == .appleSearchHints || $0.isAppleAdsSuggestion)
                 && !$0.isActivelyTracked
         }.map { normalizedKeyword($0.keyword) })
         let records = project.keywords.filter {
@@ -616,11 +618,16 @@ struct KeywordWorkspaceView: View {
 
         return Dictionary(grouping: records) { normalizedKeyword($0.keyword) }
             .compactMap { normalized, groupedRecords in
+                let measuredRecords = groupedRecords.filter(\.hasPopularityMeasurement)
                 guard let representative = groupedRecords.max(by: { lhs, rhs in
                     if lhs.opportunityScore != rhs.opportunityScore {
                         return lhs.opportunityScore < rhs.opportunityScore
                     }
-                    return lhs.popularity < rhs.popularity
+                    let lhsExact = lhs.hasPopularityMeasurement ? lhs.popularity : -1
+                    let rhsExact = rhs.hasPopularityMeasurement ? rhs.popularity : -1
+                    if lhsExact != rhsExact { return lhsExact < rhsExact }
+                    return (lhs.effectiveSuggestionScore ?? -1)
+                        < (rhs.effectiveSuggestionScore ?? -1)
                 }) else {
                     return nil
                 }
@@ -642,20 +649,25 @@ struct KeywordWorkspaceView: View {
                     id: "\(selectedStore)|\(normalized)",
                     keyword: representative.keyword,
                     store: selectedStore,
-                    popularity: groupedRecords.map(\.popularity).max() ?? 0,
-                    hasPopularityData: groupedRecords.contains { $0.hasPopularityMeasurement },
+                    popularity: measuredRecords.map(\.popularity).max() ?? 0,
+                    hasPopularityData: !measuredRecords.isEmpty,
+                    suggestionScore: groupedRecords.compactMap(\.effectiveSuggestionScore).max(),
                     opportunityScore: groupedRecords.map(\.opportunityScore).max() ?? 0,
                     note: note,
                     mainKeyword: groupedRecords.first(where: {
-                        $0.source == .appleSearchHints
-                            || $0.intentTags.contains("apple-ads-suggestion")
+                        $0.source == .appleSearchHints || $0.isAppleAdsSuggestion
                     })?
                         .matchedTerms.first
                         ?? representative.matchedTerms.first
                         ?? project.seedKeywords.first
                         ?? representative.genre,
                     updatedAt: updatedAt,
-                    popularityCheckedAt: groupedRecords.compactMap(\.popularityCheckedAt).max(),
+                    popularityCheckedAt: groupedRecords.compactMap { record in
+                        if record.isAppleAdsSuggestion, record.suggestionScore == nil {
+                            return nil
+                        }
+                        return record.popularityCheckedAt
+                    }.max(),
                     month: groupedRecords.compactMap(\.month).max(),
                     metrics: metrics
                 )
@@ -666,6 +678,9 @@ struct KeywordWorkspaceView: View {
                 }
                 if $0.hasPopularityData != $1.hasPopularityData { return $0.hasPopularityData }
                 if $0.popularity != $1.popularity { return $0.popularity > $1.popularity }
+                if $0.suggestionScoreSortValue != $1.suggestionScoreSortValue {
+                    return $0.suggestionScoreSortValue > $1.suggestionScoreSortValue
+                }
                 return $0.keyword.localizedCaseInsensitiveCompare($1.keyword) == .orderedAscending
             }
     }
@@ -889,6 +904,7 @@ private struct KeywordWorkspaceRow: Identifiable {
     let store: String
     let popularity: Int
     let hasPopularityData: Bool
+    let suggestionScore: Int?
     let opportunityScore: Double
     let note: String?
     let mainKeyword: String
@@ -900,6 +916,7 @@ private struct KeywordWorkspaceRow: Identifiable {
     var noteSortValue: String { note ?? "" }
     var updateSortValue: Date { updatedAt ?? .distantPast }
     var popularitySortValue: Int { hasPopularityData ? popularity : -1 }
+    var suggestionScoreSortValue: Int { suggestionScore ?? -1 }
     var difficultySortValue: Int { metrics.difficulty ?? -1 }
     var positionSortValue: Int { metrics.focusAppPosition ?? Int.max }
     var rankingAppCount: Int { metrics.topApps.count }
@@ -1357,6 +1374,7 @@ private struct SuggestionsSheet: View {
     @State private var selection: Set<String> = []
     @State private var searchText = ""
     @State private var sortOrder = [
+        KeyPathComparator(\KeywordWorkspaceRow.suggestionScoreSortValue, order: .reverse),
         KeyPathComparator(\KeywordWorkspaceRow.popularitySortValue, order: .reverse),
     ]
     @State private var metricFilters = KeywordMetricFilters()
@@ -1439,6 +1457,11 @@ private struct SuggestionsSheet: View {
 
                     TableColumn("Suggestion", value: \.keyword)
 
+                    TableColumn("Suggestion Score", value: \.suggestionScoreSortValue) { row in
+                        AppleAdsSuggestionScoreCell(value: row.suggestionScore)
+                    }
+                    .width(112)
+
                     TableColumn("Popularity", value: \.popularitySortValue) { row in
                         MetricBar(value: row.hasPopularityData ? row.popularity : nil, kind: .popularity)
                     }
@@ -1488,7 +1511,7 @@ private struct SuggestionsSheet: View {
             .padding(.horizontal, 16)
             .frame(height: 48)
         }
-        .frame(width: 860, height: 460)
+        .frame(width: 980, height: 460)
         .task {
             await Task.yield()
             isSearchFocused = true
